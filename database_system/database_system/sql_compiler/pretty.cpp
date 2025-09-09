@@ -6,6 +6,48 @@
 
 namespace minidb {
 
+    // 将 TokenType + 词面，映射到课程“种别码”
+    int LexCategoryCode(TokenType t, const std::string& lexeme_upper) {
+        switch (t) {
+        case TokenType::KEYWORD:   return 1;
+        case TokenType::IDENT:     return 2;
+        case TokenType::INTCONST:
+        case TokenType::STRCONST:  return 3;
+        case TokenType::PLUS: case TokenType::MINUS:
+        case TokenType::STAR: case TokenType::SLASH: case TokenType::PERCENT:
+        case TokenType::EQ: case TokenType::NEQ: case TokenType::LT:
+        case TokenType::LE: case TokenType::GT: case TokenType::GE:
+            return 4; // 运算符
+        case TokenType::COMMA: case TokenType::SEMI: case TokenType::DOT:
+        case TokenType::LPAREN: case TokenType::RPAREN:
+        case TokenType::LBRACE: case TokenType::RBRACE:
+        case TokenType::LBRACKET: case TokenType::RBRACKET:
+            return 5; // 界符
+        default: return 99;
+        }
+    }
+
+    // 打印四元式 [种别码, "词素", 行, 列]
+    void PrintTokenQuads(const std::string& sql, int start_line, std::ostream& os) {
+        // 你的 Lexer 支持 (sql, start_line) 构造
+        Lexer lx(sql, start_line);
+        while (true) {
+            Token t = lx.next();
+            if (t.type == TokenType::END) break;
+            if (t.type == TokenType::INVALID) {
+                os << "[LEX ERROR, \"" << t.lexeme << "\", " << t.line << ", " << t.col << "]\n";
+                break;
+            }
+            // 词素大写副本，用于关键字分类显示（不改变原词素）
+            std::string up = t.lexeme;
+            for (auto& ch : up) ch = std::toupper((unsigned char)ch);
+
+            os << "[" << LexCategoryCode(t.type, up) << ", \"" << t.lexeme
+                << "\", " << t.line << ", " << t.col << "]\n";
+        }
+    }
+
+
     // ---------------- Token ----------------
     const char* TokName(TokenType t) {
         switch (t) {

@@ -94,6 +94,7 @@ static void run_one(const std::string& sql_src, int start_line, ICatalog& cat) {
 
     // 1) 词法：从指定行号开始
     {
+        // A. 可读版（你原来的）
         std::cout << "TOKENS:\n";
         Lexer lx(sql, start_line);
         while (true) {
@@ -107,6 +108,10 @@ static void run_one(const std::string& sql_src, int start_line, ICatalog& cat) {
                 return;
             }
         }
+
+        // B. 课程四元式版（新增）
+        std::cout << "TOKENS (quads):\n";
+        PrintTokenQuads(sql, start_line, std::cout);
     }
 
     // 2) 语法（AST）
@@ -144,7 +149,15 @@ int main() {
     td.columns = { {"id",DataType::INT32}, {"name",DataType::VARCHAR}, {"age",DataType::INT32} };
     cat.create_table(td);
 
-    // ① 正确用例（保持你原来的多行字符串）
+    // ① 程序实例用例
+    std::string demo =
+        "/* test_sql_program */\n"
+        "SELECT name, age\n"
+        "FROM Students\n"
+        "WHERE age > 20; -- only adults\n";
+    run_one(demo, /*start_line*/1, cat);
+
+    // ② 正确用例（保持你原来的多行字符串）
     std::string ok_sql =
         "CREATE TABLE course(cid INT, title VARCHAR);\n"
         "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
@@ -157,7 +170,7 @@ int main() {
             run_one(sql, line, cat);
     }
 
-    // ② 错误用例（同样支持跨行定位）
+    // ③ 错误用例（同样支持跨行定位）
     std::vector<std::string> bad = {
         "SELECT id FROM student",                          // 缺分号
         "SELECT idx,name FROM student;",                   // 列名拼写错误
@@ -171,6 +184,8 @@ int main() {
         run_one(s, line, cat);
         line += 1; // 让每条错误用例也能看到不同的起始行号
     }
+
+
 
     std::cout << "==== SQL compiler end ====\n";
     return 0;

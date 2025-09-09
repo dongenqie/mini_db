@@ -13,6 +13,11 @@
 
 namespace minidb {
 
+	// 四元式：种别码（1关键字/2标识符/3常量/4运算符/5界符/6注释）
+	int  LexCategoryCode(TokenType t, const std::string& lexeme_upper);
+	// 打印词法四元式（支持起始行）
+	void PrintTokenQuads(const std::string& sql, int start_line, std::ostream& os);
+
 	// ---------- Token 打印 ----------
 	const char* TokName(TokenType t);
 	void PrintTokens(const std::string& sql, std::ostream& os);
