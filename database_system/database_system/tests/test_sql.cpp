@@ -13,6 +13,41 @@
 
 using namespace minidb;
 
+static const char* TokName(TokenType t) {
+    switch (t) {
+    case TokenType::IDENT:    return "IDENT";
+    case TokenType::KEYWORD:  return "KEYWORD";
+    case TokenType::INTCONST: return "INTCONST";
+    case TokenType::STRCONST: return "STRCONST";
+    case TokenType::COMMA:    return "COMMA";
+    case TokenType::LPAREN:   return "LPAREN";
+    case TokenType::RPAREN:   return "RPAREN";
+    case TokenType::SEMI:     return "SEMI";
+    case TokenType::STAR:     return "STAR";
+    case TokenType::EQ:       return "EQ";
+    case TokenType::NEQ:      return "NEQ";
+    case TokenType::LT:       return "LT";
+    case TokenType::GT:       return "GT";
+    case TokenType::LE:       return "LE";
+    case TokenType::GE:       return "GE";
+    case TokenType::DOT:      return "DOT";
+    case TokenType::END:      return "END";
+    default:                  return "INVALID";
+    }
+}
+
+//¥Ú”°token
+static void print_tokens(const std::string& sql) {
+    std::cout << "TOKENS for: " << sql << "\n";
+    Lexer lx(sql);
+    while (true) {
+        Token t = lx.next();
+        std::cout << "  (" << TokName(t.type) << ", \"" << t.lexeme
+            << "\", " << t.line << ":" << t.col << ")\n";
+        if (t.type == TokenType::END || t.type == TokenType::INVALID) break;
+    }
+}
+
 static void run_case(const std::string& sql, ICatalog& cat) {
     Lexer lx(sql);
     Parser ps(lx);
@@ -66,5 +101,10 @@ int main() {
     }
 
     std::cout << "sql_compiler standalone tests finished.\n";
+
+    print_tokens("CREATE TABLE student(id INT, name VARCHAR, age INT);");
+    print_tokens("INSERT INTO student(id,name,age) VALUES (1,'Alice',20);");
+    print_tokens("SELECT id,name FROM student WHERE age > 18;");
+    print_tokens("DELETE FROM student WHERE id = 1;");
     return 0;
 }

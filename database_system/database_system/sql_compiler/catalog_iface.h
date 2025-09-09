@@ -34,4 +34,4 @@ namespace minidb {
         std::unordered_map<std::string, TableDef> tables_;
     };
 
-} // namespace minidb#pragma once
+} // namespace minidb

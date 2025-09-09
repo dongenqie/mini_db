@@ -94,7 +94,7 @@ namespace minidb {
             if (i_ + 1 < s_.size() && s_[i_ + 1] == '=') { adv(); adv(); return { TokenType::LE, "<=", sl, sc }; }
             adv(); return { TokenType::LT, "<", sl, sc };
         case '>':
-            if (i_ + 1 < s_.size() && s_[i_1] == '=') {} // ·ÀÎóÐ´
+            if (i_ + 1 < s_.size() && s_[i_ + 1] == '=') {} // ·ÀÎóÐ´
             if (i_ + 1 < s_.size() && s_[i_ + 1] == '=') { adv(); adv(); return { TokenType::GE, ">=", sl, sc }; }
             adv(); return { TokenType::GT, ">", sl, sc };
         case '\'': return string();
