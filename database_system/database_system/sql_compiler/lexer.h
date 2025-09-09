@@ -24,6 +24,11 @@ namespace minidb {
     class Lexer {
     public:
         explicit Lexer(const std::string& input) : s_(input) {}
+
+        // 新增：允许指定起始行、列（默认 1:1）
+        Lexer(const std::string& input, int start_line, int start_col = 1)
+            : s_(input), i_(0), line_(start_line), col_(start_col) {}
+
         Token next();          // 消费一个
         Token peek();          // 预读一个
 

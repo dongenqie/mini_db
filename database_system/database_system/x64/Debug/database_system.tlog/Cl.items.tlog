@@ -4,6 +4,7 @@ D:\practical\database\database_system\database_system\engine\storage_engine.cpp;
 D:\practical\database\database_system\database_system\sql_compiler\lexer.cpp;D:\practical\database\database_system\database_system\x64\Debug\lexer.obj
 D:\practical\database\database_system\database_system\sql_compiler\parser.cpp;D:\practical\database\database_system\database_system\x64\Debug\parser.obj
 D:\practical\database\database_system\database_system\sql_compiler\planner.cpp;D:\practical\database\database_system\database_system\x64\Debug\planner.obj
+D:\practical\database\database_system\database_system\sql_compiler\pretty.cpp;D:\practical\database\database_system\database_system\x64\Debug\pretty.obj
 D:\practical\database\database_system\database_system\sql_compiler\semantic.cpp;D:\practical\database\database_system\database_system\x64\Debug\semantic.obj
 D:\practical\database\database_system\database_system\storage\buffer.cpp;D:\practical\database\database_system\database_system\x64\Debug\buffer.obj
 D:\practical\database\database_system\database_system\storage\file_manager.cpp;D:\practical\database\database_system\database_system\x64\Debug\file_manager.obj

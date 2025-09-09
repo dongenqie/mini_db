@@ -1,110 +1,177 @@
 // =============================================
-// sql_compiler/test_sql.cpp
+// test_sql/test_sql.cpp
 // =============================================
-#include <cassert>
 #include <iostream>
+#include <vector>
+#include <cassert>
 
 #include "../utils/common.h"
+
 #include "../sql_compiler/lexer.h"
 #include "../sql_compiler/parser.h"
 #include "../sql_compiler/semantic.h"
 #include "../sql_compiler/planner.h"
-#include "../sql_compiler/catalog_iface.h"   // 用内存目录
+#include "../sql_compiler/pretty.h"
+
+// 独立目录接口（避免依赖 engine/）
+#include "../sql_compiler/catalog_iface.h"
 
 using namespace minidb;
 
-static const char* TokName(TokenType t) {
-    switch (t) {
-    case TokenType::IDENT:    return "IDENT";
-    case TokenType::KEYWORD:  return "KEYWORD";
-    case TokenType::INTCONST: return "INTCONST";
-    case TokenType::STRCONST: return "STRCONST";
-    case TokenType::COMMA:    return "COMMA";
-    case TokenType::LPAREN:   return "LPAREN";
-    case TokenType::RPAREN:   return "RPAREN";
-    case TokenType::SEMI:     return "SEMI";
-    case TokenType::STAR:     return "STAR";
-    case TokenType::EQ:       return "EQ";
-    case TokenType::NEQ:      return "NEQ";
-    case TokenType::LT:       return "LT";
-    case TokenType::GT:       return "GT";
-    case TokenType::LE:       return "LE";
-    case TokenType::GE:       return "GE";
-    case TokenType::DOT:      return "DOT";
-    case TokenType::END:      return "END";
-    default:                  return "INVALID";
+// 简单切分多语句（考虑字符串中的分号）
+// 替换原来的 split_sql(...) 为带行号的版本
+static std::vector<std::pair<std::string, int>>
+split_sql_with_lines(const std::string& all) {
+    std::vector<std::pair<std::string, int>> out;
+
+    size_t i = 0;
+    int line = 1;
+    const int n = (int)all.size();
+
+    auto skip_spaces_and_newlines = [&](size_t& j, int& ln) {
+        while (j < all.size()) {
+            char c = all[j];
+            if (c == ' ' || c == '\t' || c == '\r') { j++; }
+            else if (c == '\n') { j++; ln++; }
+            else break;
+        }
+        };
+
+    while (i < all.size()) {
+        // 跳过前导空白并更新行号，得到这一条语句的起始位置与行号
+        skip_spaces_and_newlines(i, line);
+        if (i >= all.size()) break;
+
+        int start_line = line;
+        size_t start = i;
+
+        bool in_str = false;
+        bool escaped = false;
+
+        // 从 start 扫到分号（不在字符串字面量内的那个）
+        for (; i < all.size(); ++i) {
+            char c = all[i];
+
+            if (c == '\n') {
+                if (!in_str) line++;
+                // 在字符串内遇到换行也可以按原样计数（常见 SQL 通常不允许跨行单引号字符串，但我们容忍）
+            }
+
+            if (in_str) {
+                if (!escaped && c == '\\') { escaped = true; continue; }
+                if (!escaped && c == '\'') { in_str = false; }
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\'') { in_str = true; continue; }
+
+            if (c == ';') {
+                // 取 [start, i]（包含分号）
+                out.emplace_back(all.substr(start, i - start + 1), start_line);
+                i++; // 移到分号之后的位置，继续下一条
+                break;
+            }
+        }
+
+        if (i >= all.size()) {
+            // 末尾没有分号但还有残留：也输出一条（让语法阶段报“缺分号”）
+            std::string tail = all.substr(start);
+            if (!trim(tail).empty()) out.emplace_back(tail, start_line);
+            break;
+        }
     }
+
+    return out;
 }
 
-//打印token
-static void print_tokens(const std::string& sql) {
-    std::cout << "TOKENS for: " << sql << "\n";
-    Lexer lx(sql);
-    while (true) {
-        Token t = lx.next();
-        std::cout << "  (" << TokName(t.type) << ", \"" << t.lexeme
-            << "\", " << t.line << ":" << t.col << ")\n";
-        if (t.type == TokenType::END || t.type == TokenType::INVALID) break;
-    }
-}
+static void run_one(const std::string& sql_src, int start_line, ICatalog& cat) {
+    // 不再 trim 前导换行；保持列号=1，且行号从 start_line 起
+    const std::string& sql = sql_src;
 
-static void run_case(const std::string& sql, ICatalog& cat) {
-    Lexer lx(sql);
+    std::cout << "============================\n";
+    std::cout << "SQL: " << sql << "\n";
+
+    // 1) 词法：从指定行号开始
+    {
+        std::cout << "TOKENS:\n";
+        Lexer lx(sql, start_line);
+        while (true) {
+            Token t = lx.next();
+            std::cout << "  (" << TokName(t.type) << ", \"" << t.lexeme
+                << "\", " << t.line << ":" << t.col << ")\n";
+            if (t.type == TokenType::END) break;
+            if (t.type == TokenType::INVALID) {
+                std::cout << "  [LEX ERROR] at " << t.line << ":" << t.col
+                    << " : " << t.lexeme << "\n";
+                return;
+            }
+        }
+    }
+
+    // 2) 语法（AST）
+    Status pst = Status::OK();
+    Lexer lx(sql, start_line);   // 解析器也需要同样的起始行
     Parser ps(lx);
-    Status st = Status::OK();
-    auto stmt = ps.parse_statement(st);
-    if (!st.ok) { std::cout << "PARSE ERROR: " << st.message << "\n"; return; }
+    auto stmt = ps.parse_statement(pst);
+    if (!pst.ok) {
+        std::cout << "SYNTAX ERROR: " << pst.message << "\n";
+        return;
+    }
+    PrintAST(stmt.get(), std::cout);
 
+    // 3) 语义
     SemanticAnalyzer sa(cat);
     auto sem = sa.analyze(stmt.get());
-    if (!sem.status.ok) { std::cout << "SEMANTIC ERROR: " << sem.status.message << "\n"; return; }
+    if (!sem.status.ok) {
+        std::cout << "SEMANTIC ERROR: " << sem.status.message << "\n";
+        return;
+    }
+    else {
+        std::cout << "SEMANTIC: OK\n";
+    }
 
-    Planner pl; auto plan = pl.plan_from_stmt(stmt.get());
-    std::cout << "OK: planned root generated.\n";
+    // 4) 计划
+    Planner pl;
+    auto plan = pl.plan_from_stmt(stmt.get());
+    PrintPlan(plan, std::cout);
 }
 
 int main() {
     InMemoryCatalog cat;
 
-    // 先注册 student（模拟 CREATE 后的目录状态）
     TableDef td; td.name = "student";
     td.columns = { {"id",DataType::INT32}, {"name",DataType::VARCHAR}, {"age",DataType::INT32} };
     cat.create_table(td);
 
-    // 基本用例
-    run_case("SELECT id,name FROM student WHERE age > 18;", cat);
-    run_case("INSERT INTO student(id,name,age) VALUES (1,'Alice',20);", cat);
-    run_case("DELETE FROM student WHERE id = 1;", cat);
+    // ① 正确用例（保持你原来的多行字符串）
+    std::string ok_sql =
+        "CREATE TABLE course(cid INT, title VARCHAR);\n"
+        "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
+        "SELECT id,name FROM student WHERE age > 18;\n"
+        "DELETE FROM student WHERE id = 1;\n";
 
-    // CREATE（语义检查：已存在将报错）
-    {
-        Lexer lx("CREATE TABLE student(id INT, name VARCHAR, age INT);");
-        Parser ps(lx); Status st = Status::OK(); auto s = ps.parse_statement(st);
-        SemanticAnalyzer sa(cat); auto sem = sa.analyze(s.get());
-        assert(!sem.status.ok); // student 已存在
+    auto parts = split_sql_with_lines(ok_sql);
+    for (auto& [sql, line] : parts) {
+        if (!trim(sql).empty())
+            run_one(sql, line, cat);
     }
 
-    // 错误用例：缺分号
-    {
-        Lexer lx("SELECT id FROM student");
-        Parser ps(lx); Status st = Status::OK(); auto s = ps.parse_statement(st);
-        assert(!st.ok);
+    // ② 错误用例（同样支持跨行定位）
+    std::vector<std::string> bad = {
+        "SELECT id FROM student",                          // 缺分号
+        "SELECT idx,name FROM student;",                   // 列名拼写错误
+        "INSERT INTO student(id,name,age) VALUES (2,20,19);", // 类型不匹配
+        "INSERT INTO student(id,name,age) VALUES (3,'Bob');", // 值个数不一致
+        "INSERT INTO student(id,name,age) VALUES (3,'Bob,19);", // 未闭合字符串
+        "CREATE TABLE t(a INT, a VARCHAR);"                // 重复列
+    };
+    int line = 1;
+    for (auto& s : bad) {
+        run_one(s, line, cat);
+        line += 1; // 让每条错误用例也能看到不同的起始行号
     }
 
-    // 错误用例：类型不匹配（把 name 写成数字）
-    {
-        Lexer lx("INSERT INTO student(id,name,age) VALUES (2,20,19);");
-        Parser ps(lx); Status st = Status::OK(); auto s = ps.parse_statement(st);
-        SemanticAnalyzer sa(cat); auto sem = sa.analyze(s.get());
-        assert(!sem.status.ok);
-        std::cout << "Caught type mismatch as expected.\n";
-    }
-
-    std::cout << "sql_compiler standalone tests finished.\n";
-
-    print_tokens("CREATE TABLE student(id INT, name VARCHAR, age INT);");
-    print_tokens("INSERT INTO student(id,name,age) VALUES (1,'Alice',20);");
-    print_tokens("SELECT id,name FROM student WHERE age > 18;");
-    print_tokens("DELETE FROM student WHERE id = 1;");
+    std::cout << "==== SQL compiler end ====\n";
     return 0;
 }

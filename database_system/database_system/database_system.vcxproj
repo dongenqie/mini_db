@@ -104,7 +104,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-	  <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>
 		  $(ProjectDir)\database_system;
 		  $(ProjectDir)\database_system\utils;
@@ -145,6 +145,7 @@
     <ClInclude Include="sql_compiler\lexer.h" />
     <ClInclude Include="sql_compiler\parser.h" />
     <ClInclude Include="sql_compiler\planner.h" />
+    <ClInclude Include="sql_compiler\pretty.h" />
     <ClInclude Include="sql_compiler\semantic.h" />
     <ClInclude Include="storage\buffer.hpp" />
     <ClInclude Include="storage\file_manager.hpp" />
@@ -163,6 +164,7 @@
     <ClCompile Include="sql_compiler\lexer.cpp" />
     <ClCompile Include="sql_compiler\parser.cpp" />
     <ClCompile Include="sql_compiler\planner.cpp" />
+    <ClCompile Include="sql_compiler\pretty.cpp" />
     <ClCompile Include="sql_compiler\semantic.cpp" />
     <ClCompile Include="storage\buffer.cpp" />
     <ClCompile Include="storage\file_manager.cpp" />
