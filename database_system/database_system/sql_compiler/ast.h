@@ -1,8 +1,8 @@
 // =============================================
-// sql_compiler/ast.hpp
+// sql_compiler/ast.h
 // =============================================
 #pragma once
-#include "../utils/common.hpp"
+#include "../utils/common.h"
 #include <memory>
 
 namespace minidb {
