@@ -1,8 +1,8 @@
 // =============================================
-// sql_compiler/lexer.hpp 
+// sql_compiler/lexer.h 
 // =============================================
 #pragma once
-#include "../utils/common.hpp"
+#include "../utils/common.h"
 #include <cctype>
 
 namespace minidb {

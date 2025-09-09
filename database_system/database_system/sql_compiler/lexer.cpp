@@ -1,7 +1,7 @@
 // =============================================
 // sql_compiler/lexer.cpp
 // =============================================
-#include "lexer.hpp"
+#include "lexer.h"
 #include <unordered_set>
 
 namespace minidb {

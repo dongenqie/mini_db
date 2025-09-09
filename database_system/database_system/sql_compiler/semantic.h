@@ -2,8 +2,8 @@
 // sql_compiler/semantic.h
 // =============================================
 #pragma once
-#include "ast.hpp"
-#include "../engine/catalog_manager.hpp"
+#include "ast.h"
+#include "catalog_iface.h"   
 
 namespace minidb {
 
@@ -11,7 +11,7 @@ namespace minidb {
 
     class SemanticAnalyzer {
     public:
-        explicit SemanticAnalyzer(CatalogManager& c) : cat_(c) {}
+        explicit SemanticAnalyzer(ICatalog& c) : cat_(c) {}
         SemanticResult analyze(Stmt* s);
 
     private:
@@ -23,7 +23,8 @@ namespace minidb {
         std::optional<DataType> expr_type(const Expr*, const TableDef&, Status&);
 
     private:
-        CatalogManager& cat_;
+        ICatalog& cat_;
     };
 
-} // namespace minidb#pragma once
+} // namespace minidb
+

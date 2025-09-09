@@ -1,7 +1,7 @@
 // =============================================
 // sql_compiler/planner.cpp
 // =============================================
-#include "planner.hpp"
+#include "planner.h"
 
 namespace minidb {
 

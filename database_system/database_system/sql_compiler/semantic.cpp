@@ -1,7 +1,7 @@
 // =============================================
 // sql_compiler/semantic.cpp
 // =============================================
-#include "semantic.hpp"
+#include "semantic.h"
 #include <unordered_set>
 
 namespace minidb {
@@ -19,12 +19,14 @@ namespace minidb {
         }
         if (dynamic_cast<const IntLit*>(e)) return DataType::INT32;
         if (dynamic_cast<const StrLit*>(e)) return DataType::VARCHAR;
+
         if (auto cmp = dynamic_cast<const CmpExpr*>(e)) {
             auto lt = expr_type(cmp->lhs.get(), td, st); if (!st.ok) return std::nullopt;
             auto rt = expr_type(cmp->rhs.get(), td, st); if (!st.ok) return std::nullopt;
             if (lt != rt) { st = Status::Error("Type mismatch in comparison"); return std::nullopt; }
-            return DataType::INT32; // 布尔结果用 INT32(0/1) 表示
+            return DataType::INT32; // 布尔用 0/1
         }
+
         st = Status::Error("Unsupported expr");
         return std::nullopt;
     }
@@ -32,9 +34,11 @@ namespace minidb {
     Status SemanticAnalyzer::check_create(const CreateTableStmt* s) {
         if (cat_.get_table(s->def.name)) return Status::Error("Table already exists: " + s->def.name);
         if (s->def.columns.empty())      return Status::Error("Empty column list");
+
         std::unordered_set<std::string> seen;
         for (auto& c : s->def.columns)
             if (!seen.insert(c.name).second) return Status::Error("Duplicate column: " + c.name);
+
         return Status::OK();
     }
 
@@ -56,6 +60,7 @@ namespace minidb {
                 pos.push_back(*idx);
             }
         }
+
         for (size_t j = 0; j < s->values.size(); ++j) {
             Status tmp = Status::OK();
             auto t = expr_type(s->values[j].get(), td, tmp);

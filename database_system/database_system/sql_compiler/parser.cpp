@@ -1,7 +1,7 @@
 // =============================================
 // sql_compiler/parser.cpp
 // =============================================
-#include "parser.hpp"
+#include "parser.h"
 
 namespace minidb {
 

@@ -2,7 +2,7 @@
 // sql_compiler/planner.h
 // =============================================
 #pragma once
-#include "ast.hpp"
+#include "ast.h"
 
 namespace minidb {
 

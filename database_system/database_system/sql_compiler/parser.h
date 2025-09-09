@@ -1,9 +1,9 @@
 // =============================================
-// sql_compiler/parser.hpp
+// sql_compiler/parser.h
 // =============================================
 #pragma once
-#include "lexer.hpp"
-#include "ast.hpp"
+#include "lexer.h"
+#include "ast.h"
 
 namespace minidb {
 
