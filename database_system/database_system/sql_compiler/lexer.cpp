@@ -57,25 +57,20 @@ namespace minidb {
     void Lexer::skip_ws() {
         while (i_ < s_.size()) {
             char c = look();
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
-                adv();
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') { adv(); continue; }
+            // 行注释
+            if (!keep_comments_ && c == '-' && look_ahead(1) == '-') {
+                while (i_ < s_.size() && look() != '\n') adv();
                 continue;
             }
-            // 行注释 / 块注释：当 keep_comments_==false 才在这里“吃掉”
-            if (!keep_comments_) {
-                if (c == '-' && look_ahead(1) == '-') {
-                    while (i_ < s_.size() && look() != '\n') adv();
-                    continue;
+            // 块注释
+            if (!keep_comments_ && c == '/' && look_ahead(1) == '*') {
+                adv(); adv(); // 吃掉 "/*"
+                while (i_ < s_.size()) {
+                    if (look() == '*' && look_ahead(1) == '/') { adv(); adv(); break; }
+                    adv();
                 }
-                if (c == '/' && look_ahead(1) == '*') {
-                    // 跳过块注释（不支持嵌套）
-                    adv(); adv(); // 吃掉 "/*"
-                    while (i_ < s_.size()) {
-                        if (look() == '*' && look_ahead(1) == '/') { adv(); adv(); break; }
-                        adv();
-                    }
-                    continue;
-                }
+                continue;
             }
             break;
         }
@@ -84,12 +79,13 @@ namespace minidb {
     // 如果 keep_comments_==true，并且当前位置是注释，就返回 COMMENT token；否则返回 nullopt
     std::optional<Token> Lexer::try_comment() {
         int sl = line_, sc = col_;
+        // 行注释
         if (look() == '-' && look_ahead(1) == '-') {
             std::string buf;
             while (i_ < s_.size() && look() != '\n') { buf.push_back(look()); adv(); }
-            Token t{ TokenType::COMMENT, buf, sl, sc, LexCategory::COMMENT };
-            return t;
+            return Token{ TokenType::COMMENT, buf, sl, sc };
         }
+        // 块注释（不支持嵌套）
         if (look() == '/' && look_ahead(1) == '*') {
             std::string buf;
             buf.push_back(look()); adv();
@@ -99,16 +95,12 @@ namespace minidb {
                 if (look() == '*' && look_ahead(1) == '/') {
                     buf.push_back(look()); adv();
                     buf.push_back(look()); adv();
-                    closed = true;
-                    break;
+                    closed = true; break;
                 }
                 buf.push_back(look()); adv();
             }
-            if (!closed) {
-                return Token{ TokenType::INVALID, "Unterminated block comment", sl, sc, LexCategory::COMMENT };
-            }
-            Token t{ TokenType::COMMENT, buf, sl, sc, LexCategory::COMMENT };
-            return t;
+            if (!closed) return Token{ TokenType::INVALID, "Unterminated block comment", sl, sc };
+            return Token{ TokenType::COMMENT, buf, sl, sc };
         }
         return std::nullopt;
     }
@@ -191,25 +183,19 @@ namespace minidb {
     Token Lexer::next() {
         if (has_) { has_ = false; return la_; }
 
-        // 若需要保留注释：优先判断注释
         if (keep_comments_) {
-            // 不跳过空白（避免注释前空白被吞） -> 手动吃空白但停在注释或非空白处
+            // 保留注释：先跳过空白（不跨过注释），再尝试读注释
             while (i_ < s_.size() && std::isspace((unsigned char)look())) adv();
-            if (auto com = try_comment(); com.has_value()) {
-                return *com;
-            }
+            if (auto com = try_comment(); com.has_value()) return *com;
         }
         else {
             skip_ws();
         }
 
-        if (i_ >= s_.size()) return Token{ TokenType::END, "", line_, col_, LexCategory::UNKNOWN };
+        if (i_ >= s_.size()) return { TokenType::END, "", line_, col_ };
 
-        // 在 keep_comments_ 模式下，注释也可能出现在这里（因为我们未调用 skip_ws）
-        if (keep_comments_) {
-            if (auto com = try_comment(); com.has_value()) {
-                return *com;
-            }
+        if (keep_comments_) { // 再尝试一次注释（例如行首就是注释）
+            if (auto com = try_comment(); com.has_value()) return *com;
         }
 
         int sl = line_, sc = col_;
