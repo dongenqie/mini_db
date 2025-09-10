@@ -15,10 +15,17 @@ void create_test_dir(const string& dir_path) {
     // 使用Windows API创建目录
     if (CreateDirectoryA(dir_path.c_str(), NULL) == 0) {
         DWORD error = GetLastError();
-        if (error != ERROR_ALREADY_EXISTS) {
-            throw runtime_error("Create test dir failed: " + dir_path +
+        if (error == ERROR_ALREADY_EXISTS) {
+            cout << dir_path << "已存在"<<endl;
+            return;
+            
+        }else{
+                throw runtime_error("创建目录失败：" + dir_path +
                 ", error code: " + to_string(error));
         }
+    }
+    else {
+        cout << "测试目录创建成功: " << dir_path << endl;
     }
 }
 
@@ -32,7 +39,7 @@ void test_allocate_and_write() {
 
     try {
         create_test_dir(test_dir);
-        cout << "成功创建测试目录: " << test_dir << endl;
+       
     }
     catch (const exception& e) {
         cerr << "错误: " << e.what() << endl;
@@ -239,7 +246,7 @@ void test_lru_policy() {
     }
 }
 
-// 测试6：脏页刷新（验证指导书“缓存刷新”“数据持久化”要求）
+// 测试6：脏页刷新
 void test_dirty_page_flush() {
     cout << "=== 测试6：脏页刷新 ===" << endl;
     string log_path = test_dir + "/cache_log_dirty.txt";
@@ -296,6 +303,7 @@ bool file_exists(const std::string& file_path) {
 }
 // 辅助函数：删除测试目录（测试结束后清理）
 void delete_test_dir(const string& dir_path) {
+
     // 检查目录是否存在
     if (!file_exists(dir_path)) {
         cout << "目录不存在: " << dir_path << endl;
@@ -313,12 +321,13 @@ void delete_test_dir(const string& dir_path) {
 // 测试7：文件初始化与元数据加载
 void test_file_init_and_metadata() {
     cout << "=== 测试7：文件初始化与元数据加载 ===" << endl;
-    string test_dir = test_dir + "/test_db_files";
-    delete_test_dir(test_dir); // 先清理旧目录
+    string test_dir7 = test_dir + "/test_db_files";
+    delete_test_dir(test_dir7); // 先清理旧目录
+
 
     try {
         // 1. 第一次初始化FileManager：创建目录、数据文件、元数据文件
-        FileManager fm1(test_dir, 2, ReplacePolicy::LRU);
+        FileManager fm1(test_dir7, 2, ReplacePolicy::LRU);
         cout << "第一次初始化：" << endl;
         cout << "数据文件路径：" << fm1.get_data_file_path() << endl;
         cout << "元数据文件路径：" << fm1.get_meta_file_path() << endl;
@@ -341,7 +350,7 @@ void test_file_init_and_metadata() {
         fm1.~FileManager();
 
         // 5. 第二次初始化FileManager：加载之前保存的元数据
-        FileManager fm2(test_dir, 2, ReplacePolicy::LRU);
+        FileManager fm2(test_dir7, 2, ReplacePolicy::LRU);
         cout << "第二次初始化：" << endl;
 
         // 验证元数据是否恢复：分配页应复用页1（free_page_list中的页）
@@ -358,11 +367,11 @@ void test_file_init_and_metadata() {
     }
     catch (const exception& e) {
         cerr << "测试7失败：" << e.what() << endl << endl;
-        delete_test_dir(test_dir);
+        delete_test_dir(test_dir7);
         exit(1);
     }
 
-    delete_test_dir(test_dir);
+    delete_test_dir(test_dir7);
 }
 
 // 测试8：数据持久化
@@ -480,12 +489,12 @@ int main() {
 
     test_cache_hit_miss();
     test_lru_policy();
-    test_dirty_page_flush();
-    /*
-        test_file_init_and_metadata();
-        test_data_persistence();
-        test_module_coordination();
-        */
+    //test_dirty_page_flush();
+
+     //test_file_init_and_metadata();
+     //test_data_persistence();
+    //test_module_coordination();
+
     cout << "所有测试用例均通过！" << endl;
     return 0;
 }

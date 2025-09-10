@@ -3,7 +3,6 @@
 #include <iostream>
 
 using namespace std;
-
 // 构造函数：初始化数据文件和核心参数
 PageManager::PageManager(const string& data_path)
     : data_file_path(data_path), next_page_id(1) {
@@ -21,10 +20,10 @@ uint32_t PageManager::allocate_page() {
     else {
         // 无空闲页：分配新页号（递增确保唯一）
         page_id = next_page_id++;
-        // 扩展数据文件：新增一页大小的空空间（避免后续写页时偏移超出文件大小）
+        // 扩展数据文件：新增一页大小的空间（避免后续写页时偏移超出文件大小）
         ofstream data_file(data_file_path, ios::app | ios::binary);
         if (!data_file) {
-            throw runtime_error("Page allocate failed: extend data file failed");
+            throw runtime_error("page_manager.cpp——扩展数据文件失败");
         }
         char empty_page[PAGE_SIZE] = { 0 }; // 空页初始化（全0）
         data_file.write(empty_page, PAGE_SIZE);
@@ -35,7 +34,7 @@ uint32_t PageManager::allocate_page() {
     Page new_page(page_id);
     new_page.serialize();
     if (!write_page(page_id, new_page)) {
-        throw runtime_error("Page allocate failed: write new page to disk failed");
+        throw runtime_error("page_manager.cpp——页分配失败: 设置页号写入磁盘失败");
     }
 
     return page_id;

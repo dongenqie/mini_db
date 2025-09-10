@@ -8,15 +8,24 @@
 #include <windows.h>
 using namespace std;
 
+
 // -------------------------- 私有辅助函数：初始化数据库目录 --------------------------
 void FileManager::init_db_directory() {
-    // 若目录不存在，创建目录
+    // 如果目录不存在，尝试创建它
     if (CreateDirectoryA(db_dir.c_str(), NULL) == 0) {
         DWORD error = GetLastError();
-        if (error != ERROR_ALREADY_EXISTS) {
-            throw runtime_error("Create test dir failed: " + db_dir +
+        if (error == ERROR_ALREADY_EXISTS) {
+            cout << db_dir << "已存在" << endl;
+            return;
+
+        }
+        else {
+            throw runtime_error("创建目录失败：" + db_dir +
                 ", error code: " + to_string(error));
         }
+    }
+    else {
+        cout << "目录创建成功: " << db_dir << endl;
     }
 }
 
@@ -93,13 +102,15 @@ void FileManager::save_metadata() {
 // -------------------------- 构造函数：初始化所有组件 --------------------------
 FileManager::FileManager(const string& db_dir, uint32_t cache_cap, ReplacePolicy policy)
     : db_dir(db_dir),
+    //创建目录
+    
     // 初始化文件路径（目录+默认文件名）
-    data_file_path(db_dir + "/" + DATA_FILE_NAME),
-    meta_file_path(db_dir + "/" + META_FILE_NAME),
+    data_file_path(db_dir + "\\" + DATA_FILE_NAME),
+    meta_file_path(db_dir + "\\" + META_FILE_NAME),
     // 初始化PageManager（暂不设置元数据，后续load_metadata更新）
     page_manager(data_file_path),
     // 初始化CacheManager（关联PageManager，日志文件存入数据库目录）
-    cache_manager(page_manager, cache_cap, policy, db_dir + "/cache_log.txt") {
+    cache_manager(page_manager, cache_cap, policy, db_dir + "\\cache_log.txt") {
     // 1. 初始化数据库目录
     init_db_directory();
     // 2. 加载元数据（从meta.dat恢复页管理状态）
