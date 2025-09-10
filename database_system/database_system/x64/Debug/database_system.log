@@ -1,6 +1,2 @@
-﻿  lexer.cpp
-  parser.cpp
-  pretty.cpp
-  test_sql.cpp
-  正在生成代码...
+﻿  test_sql.cpp
   database_system.vcxproj -> D:\practical\database\database_system\x64\Debug\database_system.exe
