@@ -94,13 +94,15 @@ static void run_one(const std::string& sql_src, int start_line, ICatalog& cat) {
 
     // 1) 词法：从指定行号开始
     {
-        // A. 可读版（你原来的）
         std::cout << "TOKENS:\n";
-        Lexer lx(sql, start_line);
+        Lexer lx(sql, start_line, /*start_col*/0, /*keep_comments*/true);
         while (true) {
             Token t = lx.next();
-            std::cout << "  (" << TokName(t.type) << ", \"" << t.lexeme
-                << "\", " << t.line << ":" << t.col << ")\n";
+            // >>> 按你要的格式输出：
+            std::cout << "  (type=\"" << TokName(t.type)
+                << "\", value=\"" << t.lexeme
+                << "\", line=" << t.line
+                << ", column=" << t.col << ")\n";
             if (t.type == TokenType::END) break;
             if (t.type == TokenType::INVALID) {
                 std::cout << "  [LEX ERROR] at " << t.line << ":" << t.col
@@ -109,7 +111,7 @@ static void run_one(const std::string& sql_src, int start_line, ICatalog& cat) {
             }
         }
 
-        // B. 课程四元式版（新增）
+        //（可选）如果你还想输出课程“四元式”，保留下面两行：
         std::cout << "TOKENS (quads):\n";
         PrintTokenQuads(sql, start_line, std::cout);
     }
@@ -170,20 +172,21 @@ int main() {
             run_one(sql, line, cat);
     }
 
-    // ③ 错误用例（同样支持跨行定位）
-    std::vector<std::string> bad = {
-        "SELECT id FROM student",                          // 缺分号
-        "SELECT idx,name FROM student;",                   // 列名拼写错误
-        "INSERT INTO student(id,name,age) VALUES (2,20,19);", // 类型不匹配
-        "INSERT INTO student(id,name,age) VALUES (3,'Bob');", // 值个数不一致
-        "INSERT INTO student(id,name,age) VALUES (3,'Bob,19);", // 未闭合字符串
-        "CREATE TABLE t(a INT, a VARCHAR);"                // 重复列
-    };
-    int line = 1;
-    for (auto& s : bad) {
-        run_one(s, line, cat);
-        line += 1; // 让每条错误用例也能看到不同的起始行号
-    }
+ //   // ③ 错误用例（同样支持跨行定位）
+ //   std::vector<std::string> bad = {
+ //       "SELECT id FROM student",                          // 缺分号
+ //       "SELECT idx,name FROM student;",                   // 列名拼写错误
+ //       "INSERT INTO student(id,name,age) VALUES (2,20,19);", // 类型不匹配
+ //       "INSERT INTO student(id,name,age) VALUES (3,'Bob');", // 值个数不一致
+ //       "INSERT INTO student(id,name,age) VALUES (3,'Bob,19);", // 未闭合字符串
+ //       "CREATE TABLE t(a INT, a VARCHAR);"                // 重复列
+ //   };
+
+ //   int line = 1;
+ //   for (auto& s : bad) {
+ //       run_one(s, line, cat);
+ //       line += 1; // 让每条错误用例也能看到不同的起始行号
+ //   }
 
 
 

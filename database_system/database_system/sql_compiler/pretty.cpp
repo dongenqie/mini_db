@@ -23,6 +23,7 @@ namespace minidb {
         case TokenType::LBRACE: case TokenType::RBRACE:
         case TokenType::LBRACKET: case TokenType::RBRACKET:
             return 5; // 界符
+        case TokenType::COMMENT: return 6;       // 注释
         default: return 99;
         }
     }
@@ -30,7 +31,7 @@ namespace minidb {
     // 打印四元式 [种别码, "词素", 行, 列]
     void PrintTokenQuads(const std::string& sql, int start_line, std::ostream& os) {
         // 你的 Lexer 支持 (sql, start_line) 构造
-        Lexer lx(sql, start_line);
+        Lexer lx(sql, start_line, /*start_col*/0, /*keep_comments*/true);
         while (true) {
             Token t = lx.next();
             if (t.type == TokenType::END) break;
@@ -66,6 +67,7 @@ namespace minidb {
         case TokenType::GT:       return "GT";
         case TokenType::LE:       return "LE";
         case TokenType::GE:       return "GE";
+        case TokenType::COMMENT: return "COMMENT"; 
         case TokenType::DOT:      return "DOT";
         case TokenType::END:      return "END";
         default:                  return "INVALID";
@@ -78,7 +80,7 @@ namespace minidb {
         while (true) {
             Token t = lx.next();
             os << "  (" << TokName(t.type) << ", \"" << t.lexeme
-                << "\", " << t.line << ":" << t.col << ")\n";
+                << "\", " << t.line << ", " << t.col << ")\n";
             if (t.type == TokenType::END) break;
             if (t.type == TokenType::INVALID) {
                 os << "  [LEX ERROR] at " << t.line << ":" << t.col

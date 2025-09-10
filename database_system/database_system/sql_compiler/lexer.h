@@ -50,8 +50,8 @@ namespace minidb {
     struct Token {
         TokenType type{ TokenType::INVALID };
         std::string lexeme;     // 原始词素（keyword 我们会保留大写形式）
-        int line{ 1 };
-        int col{ 1 };
+        int line{ 1 };   //行号起始
+        int col{ 0 };    //列号起始
         // 词法类别（用于四元式打印）
         LexCategory category{ LexCategory::UNKNOWN };
     };
@@ -61,8 +61,11 @@ namespace minidb {
     // --------- Lexer -----------
     class Lexer {
     public:
-        // 默认从 1:1 开始；支持指定起始行列用于“多语句 + 正确行号”场景
-        explicit Lexer(const std::string& input, int start_line = 1, int start_col = 1, bool keep_comments = false)
+        // 新增：支持设置起始行/列，以及是否把注释作为 token 返回
+        explicit Lexer(const std::string& input,
+            int start_line = 1,
+            int start_col = 0,
+            bool keep_comments = false)
             : s_(input), line_(start_line), col_(start_col), keep_comments_(keep_comments) {}
 
         Token next();
