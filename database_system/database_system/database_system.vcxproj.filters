@@ -15,37 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="engine\catalog_manager.hpp">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="engine\executor.hpp">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="engine\storage_engine.hpp">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="sql_compiler\ast.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="sql_compiler\lexer.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="sql_compiler\parser.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="sql_compiler\planner.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="sql_compiler\semantic.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="sql_compiler\catalog_adapter_engine.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="sql_compiler\catalog_iface.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="storage\buffer.hpp">
+    <ClInclude Include="storage\cache_manager.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="storage\file_manager.hpp">
@@ -54,13 +24,7 @@
     <ClInclude Include="storage\page.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="utils\common.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="utils\constants.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="utils\helpers.h">
+    <ClInclude Include="storage\page_manager.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
@@ -68,28 +32,7 @@
     <ClCompile Include="cli\main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="engine\catalog_manager.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="engine\executor.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="engine\storage_engine.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="sql_compiler\lexer.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="sql_compiler\parser.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="sql_compiler\planner.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="sql_compiler\semantic.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="storage\buffer.cpp">
+    <ClCompile Include="storage\cache_manager.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="storage\file_manager.cpp">
@@ -101,7 +44,7 @@
     <ClCompile Include="tests\test_db.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="tests\test_sql.cpp">
+    <ClCompile Include="storage\page_manager.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="tests\test_storage.cpp">
