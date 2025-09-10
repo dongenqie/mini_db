@@ -1,2 +1,20 @@
-﻿  test_sql.cpp
-  database_system.vcxproj -> D:\practical\database\database_system\x64\Debug\database_system.exe
+﻿  file_manager.cpp
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\storage\cache_manager.hpp(77,62): warning C4267: “return”: 从“size_t”转换到“uint32_t”，可能丢失数据
+  (编译源文件“storage/file_manager.cpp”)
+  
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\storage\file_manager.cpp(82,30): warning C4267: “初始化”: 从“size_t”转换到“uint32_t”，可能丢失数据
+  test_storage.cpp
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\storage\cache_manager.hpp(77,62): warning C4267: “return”: 从“size_t”转换到“uint32_t”，可能丢失数据
+  (编译源文件“tests/test_storage.cpp”)
+  
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(255,77): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(270,71): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(276,80): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(382,82): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(383,47): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(400,75): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(431,69): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(441,69): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp(451,68): warning C4267: “参数”: 从“size_t”转换到“uint32_t”，可能丢失数据
+  正在生成代码...
+  database_system.vcxproj -> C:\Users\que07\Desktop\实训\202509\mini_db\database_system\x64\Debug\database_system.exe
