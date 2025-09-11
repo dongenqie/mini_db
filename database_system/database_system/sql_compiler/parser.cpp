@@ -259,94 +259,182 @@ namespace minidb {
 
     // ---------- CREATE ----------
     StmtPtr Parser::parse_create(Status& st) {
+        if (trace_on_) {
+            std::cout
+                << " ============== 规则清单 ==============\n"
+                << "(1) Prog -> Create ';'\n"
+                << "(2) Create -> CREATE TABLE ID '(' ColDefs ')'\n"
+                << "(3) ColDefs -> ColDef (',' ColDef)*\n"
+                << "(4) ColDef -> ID Type\n"
+                << "(5) Type -> INT | VARCHAR\n";
+        }
+
         trace_push("Prog");
-        trace_use_rule(1, "Prog -> Create ';'");
-        trace_push("Create");
-        trace_use_rule(2, "Create -> CREATE TABLE TblDef");
+        trace_use_rule(1, "Prog -> Create ';'");              // 展开 Prog
+        trace_use_rule(2, "Create -> CREATE TABLE ID '(' ColDefs ')'");
 
-        expect_kw("CREATE", st, "CREATE"); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("CREATE");
-        expect_kw("TABLE", st, "TABLE");  if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("TABLE");
+        // CREATE
+        Token kwCreate = expect_kw("CREATE", st, "CREATE"); if (!st.ok) return nullptr;
+        trace_match_tok(kwCreate, "CREATE");
 
-        Token name = expect(TokenType::IDENT, st, "table name"); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("ID(" + name.lexeme + ")");
+        // TABLE
+        Token kwTable = expect_kw("TABLE", st, "TABLE"); if (!st.ok) return nullptr;
+        trace_match_tok(kwTable, "TABLE");
 
-        if (!accept(TokenType::LPAREN)) { st = Status::Error("Expected '('"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("(");
+        // 表名
+        Token name = expect(TokenType::IDENT, st, "table name"); if (!st.ok) return nullptr;
+        trace_match_tok(name, "ID(" + name.lexeme + ")");
+
+        // '('
+        Token lp = expect(TokenType::LPAREN, st, "'('"); if (!st.ok) return nullptr;
+        trace_match_tok(lp, "'('");
+
+        // ColDefs
+        trace_use_rule(3, "ColDefs -> ColDef (',' ColDef)*");
 
         TableDef td; td.name = name.lexeme;
+
+        // ColDef
         while (true) {
-            Token cn = expect(TokenType::IDENT, st, "column"); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-            trace_match("ID(" + cn.lexeme + ")");
-            Token ty = expect(TokenType::KEYWORD, st, "type"); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-            trace_match(ty.lexeme);
+            trace_use_rule(4, "ColDef -> ID Type");
+            Token cn = expect(TokenType::IDENT, st, "column name"); if (!st.ok) return nullptr;
+            trace_match_tok(cn, "ID(" + cn.lexeme + ")");
+
+            Token ty = expect(TokenType::KEYWORD, st, "type(INT/VARCHAR)"); if (!st.ok) return nullptr;
+            trace_match_tok(ty, ty.lexeme);
 
             DataType dt;
             if (ty.lexeme == "INT") dt = DataType::INT32;
             else if (ty.lexeme == "VARCHAR") dt = DataType::VARCHAR;
-            else { st = Status::Error("Unsupported type: " + ty.lexeme); trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
+            else { st = Status::Error("Unsupported type: " + ty.lexeme); return nullptr; }
             td.columns.push_back({ cn.lexeme, dt });
 
-            if (accept(TokenType::COMMA)) { trace_match(","); continue; }
-            if (accept(TokenType::RPAREN)) { trace_match(")"); break; }
-            st = Status::Error("Expected ',' or ')'"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr;
+            // ',' ColDef 继续
+            if (is(TokenType::COMMA)) {
+                Token comma = expect(TokenType::COMMA, st, "','"); if (!st.ok) return nullptr;
+                trace_match_tok(comma, "','");
+                // 回到 while 顶继续打一条 ColDef 规则
+                continue;
+            }
+            break;
         }
-        if (!accept(TokenType::SEMI)) { st = Status::Error("Missing ';'"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("';'");
+
+        // ')'
+        Token rp = expect(TokenType::RPAREN, st, "')'"); if (!st.ok) return nullptr;
+        trace_match_tok(rp, "')'");
+
+        // ';'
+        Token semi = expect(TokenType::SEMI, st, "';'"); if (!st.ok) return nullptr;
+        trace_match_tok(semi, "';'");
         trace_accept();
 
-        trace_pop(); trace_pop();
-        auto c = std::make_unique<CreateTableStmt>(); c->def = std::move(td); return c;
+        auto c = std::make_unique<CreateTableStmt>();
+        c->def = std::move(td);
+        return c;
     }
 
     // ---------- INSERT ----------
     StmtPtr Parser::parse_insert(Status& st) {
-        trace_push("Prog");    trace_use_rule(1, "Prog -> Insert ';'");
-        trace_push("Insert");  trace_use_rule(2, "Insert -> INSERT INTO T (ColList)? VALUES (ValList)");
+        if (trace_on_) {
+            std::cout
+                << " ============== 规则清单 ==============\n"
+                << "(1) Prog -> Insert ';'\n"
+                << "(2) Insert -> INSERT INTO Tbl OptCols VALUES '(' ValList ')'\n"
+                << "(3) Tbl -> ID\n"
+                << "(4) OptCols -> '(' ColList ')' | ε\n"
+                << "(5) ColList -> ID (',' ID)*\n"
+                << "(6) ValList -> Expr (',' Expr)*\n";
+        }
 
-        expect_kw("INSERT", st, "INSERT"); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("INSERT");
+        trace_push("Prog");
+        trace_use_rule(1, "Prog -> Insert ';'");
+        trace_use_rule(2, "Insert -> INSERT INTO Tbl OptCols VALUES '(' ValList ')'");
 
-        if (!accept_kw("INTO")) { st = Status::Error("Expected INTO"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("INTO");
+        // INSERT
+        Token kwIns = expect_kw("INSERT", st, "INSERT"); if (!st.ok) return nullptr;
+        trace_match_tok(kwIns, "INSERT");
 
-        Token tn = expect(TokenType::IDENT, st, "table"); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("ID(" + tn.lexeme + ")");
+        // INTO
+        Token kwInto = expect_kw("INTO", st, "INTO"); if (!st.ok) return nullptr;
+        trace_match_tok(kwInto, "INTO");
+
+        // Tbl -> ID
+        trace_use_rule(3, "Tbl -> ID");
+        Token tn = expect(TokenType::IDENT, st, "table"); if (!st.ok) return nullptr;
+        trace_match_tok(tn, "ID(" + tn.lexeme + ")");
 
         std::vector<std::string> cols;
-        if (accept(TokenType::LPAREN)) {
-            trace_match("(");
-            while (true) {
-                Token cn = expect(TokenType::IDENT, st, "column"); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-                cols.push_back(cn.lexeme); trace_match("ID(" + cn.lexeme + ")");
-                if (accept(TokenType::COMMA)) { trace_match(","); continue; }
-                if (accept(TokenType::RPAREN)) { trace_match(")"); break; }
-                st = Status::Error("Expected ',' or ')'"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr;
+
+        // OptCols -> '(' ColList ')' | ε
+        if (is(TokenType::LPAREN)) {
+            trace_use_rule(4, "OptCols -> '(' ColList ')'");
+            Token lp = expect(TokenType::LPAREN, st, "'('"); if (!st.ok) return nullptr;
+            trace_match_tok(lp, "'('");
+
+            // ColList -> ID (',' ID)*
+            trace_use_rule(5, "ColList -> ID (',' ID)*");
+            Token c1 = expect(TokenType::IDENT, st, "column"); if (!st.ok) return nullptr;
+            cols.push_back(c1.lexeme);
+            trace_match_tok(c1, "ID(" + c1.lexeme + ")");
+
+            while (is(TokenType::COMMA)) {
+                Token comma = expect(TokenType::COMMA, st, "','"); if (!st.ok) return nullptr;
+                trace_match_tok(comma, "','");
+                Token ci = expect(TokenType::IDENT, st, "column"); if (!st.ok) return nullptr;
+                cols.push_back(ci.lexeme);
+                trace_match_tok(ci, "ID(" + ci.lexeme + ")");
             }
+
+            Token rp = expect(TokenType::RPAREN, st, "')'"); if (!st.ok) return nullptr;
+            trace_match_tok(rp, "')'");
+        }
+        else {
+            trace_use_rule(4, "OptCols -> ε");
         }
 
-        if (!accept_kw("VALUES")) { st = Status::Error("Expected VALUES"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("VALUES");
+        // VALUES
+        Token kwVals = expect_kw("VALUES", st, "VALUES"); if (!st.ok) return nullptr;
+        trace_match_tok(kwVals, "VALUES");
 
-        if (!accept(TokenType::LPAREN)) { st = Status::Error("Expected '(' after VALUES"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("(");
+        // '('
+        Token lp2 = expect(TokenType::LPAREN, st, "'('"); if (!st.ok) return nullptr;
+        trace_match_tok(lp2, "'('");
+
+        // ValList -> Expr (',' Expr)*
+        trace_use_rule(6, "ValList -> Expr (',' Expr)*");
 
         std::vector<std::unique_ptr<Expr>> vals;
-        while (true) {
-            auto e = parse_expr(st); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-            vals.push_back(std::move(e)); trace_match("expr");
-            if (accept(TokenType::COMMA)) { trace_match(","); continue; }
-            if (accept(TokenType::RPAREN)) { trace_match(")"); break; }
-            st = Status::Error("Expected ',' or ')'"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr;
+
+        // 第一个 Expr
+        {
+            auto e = parse_expr(st); if (!st.ok) return nullptr;
+            // 这里为了打印“匹配 expr”，做一个虚拟 token（仅用于展示）
+            Token exprTok{ TokenType::IDENT, "expr", cur().line, cur().col };
+            trace_match_tok(exprTok, "expr");
+            vals.push_back(std::move(e));
+        }
+        // 其后 , Expr*
+        while (is(TokenType::COMMA)) {
+            Token comma = expect(TokenType::COMMA, st, "','"); if (!st.ok) return nullptr;
+            trace_match_tok(comma, "','");
+            auto e = parse_expr(st); if (!st.ok) return nullptr;
+            Token exprTok{ TokenType::IDENT, "expr", cur().line, cur().col };
+            trace_match_tok(exprTok, "expr");
+            vals.push_back(std::move(e));
         }
 
-        if (!accept(TokenType::SEMI)) { st = Status::Error("Missing ';'"); trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("';'");
+        // ')'
+        Token rp2 = expect(TokenType::RPAREN, st, "')'"); if (!st.ok) return nullptr;
+        trace_match_tok(rp2, "')'");
+
+        // ';'
+        Token semi = expect(TokenType::SEMI, st, "';'"); if (!st.ok) return nullptr;
+        trace_match_tok(semi, "';'");
         trace_accept();
 
-        trace_pop(); trace_pop();
-        auto x = std::make_unique<InsertStmt>(); x->table = tn.lexeme; x->columns = std::move(cols); x->values = std::move(vals); return x;
+        auto x = std::make_unique<InsertStmt>();
+        x->table = tn.lexeme; x->columns = std::move(cols); x->values = std::move(vals);
+        return x;
     }
 
     // ---------- SELECT ----------
@@ -422,33 +510,56 @@ namespace minidb {
 
     // ---------- DELETE ----------
     StmtPtr Parser::parse_delete(Status& st) {
-        trace_push("Prog");  trace_use_rule(1, "Prog -> Delete ';'");
-        trace_push("Delete"); trace_use_rule(2, "Delete -> DELETE FROM Tbl (WHERE Expr)?");
-
-        expect_kw("DELETE", st, "DELETE"); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("DELETE");
-
-        if (!accept_kw("FROM")) {
-            st = Status::Error("Expected FROM");
-            trace_pop(); trace_pop(); sync_to_semi(); return nullptr;
+        if (trace_on_) {
+            std::cout
+                << " ============== 规则清单 ==============\n"
+                << "(1) Prog -> Delete ';'\n"
+                << "(2) Delete -> DELETE FROM Tbl OptWhere\n"
+                << "(3) Tbl -> ID\n"
+                << "(4) OptWhere -> WHERE Expr | ε\n";
         }
-        trace_match("FROM");
 
-        Token tn = expect(TokenType::IDENT, st, "table name");
-        if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; }
-        trace_match("ID(" + tn.lexeme + ")");
+        trace_push("Prog");
+        trace_use_rule(1, "Prog -> Delete ';'");
+        trace_use_rule(2, "Delete -> DELETE FROM Tbl OptWhere");
+
+        // DELETE
+        Token kwDel = expect_kw("DELETE", st, "DELETE"); if (!st.ok) return nullptr;
+        trace_match_tok(kwDel, "DELETE");
+
+        // FROM
+        Token kwFrom = expect_kw("FROM", st, "FROM"); if (!st.ok) return nullptr;
+        trace_match_tok(kwFrom, "FROM");
+
+        // Tbl -> ID
+        trace_use_rule(3, "Tbl -> ID");
+        Token tn = expect(TokenType::IDENT, st, "table name"); if (!st.ok) return nullptr;
+        trace_match_tok(tn, "ID(" + tn.lexeme + ")");
 
         std::unique_ptr<Expr> where;
-        if (accept_kw("WHERE")) { trace_match("WHERE"); where = parse_expr(st); if (!st.ok) { trace_pop(); trace_pop(); sync_to_semi(); return nullptr; } }
 
-        if (!accept(TokenType::SEMI)) {
-            st = Status::Error("Missing ';' at end of DELETE");
-            trace_pop(); trace_pop(); sync_to_semi(); return nullptr;
+        // OptWhere -> WHERE Expr | ε
+        if (accept_kw("WHERE")) {
+            // 手里没有 expect_kw 拿到的 token；补一个展示用 token:
+            Token kwWhere{ TokenType::KEYWORD, "WHERE", tn.line, tn.col };
+            trace_use_rule(4, "OptWhere -> WHERE Expr");
+            trace_match_tok(kwWhere, "WHERE");
+            where = parse_expr(st); if (!st.ok) return nullptr;
+            Token exprTok{ TokenType::IDENT, "expr", cur().line, cur().col };
+            trace_match_tok(exprTok, "expr");
         }
-        trace_match("';'");
+        else {
+            trace_use_rule(4, "OptWhere -> ε");
+        }
 
-        trace_pop(); trace_pop();
-        auto d = std::make_unique<DeleteStmt>(); d->table = tn.lexeme; d->where = std::move(where); return d;
+        // ';'
+        Token semi = expect(TokenType::SEMI, st, "';'"); if (!st.ok) return nullptr;
+        trace_match_tok(semi, "';'");
+        trace_accept();
+
+        auto d = std::make_unique<DeleteStmt>();
+        d->table = tn.lexeme; d->where = std::move(where);
+        return d;
     }
 
     // ---------- 表达式 ----------

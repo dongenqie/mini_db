@@ -153,15 +153,26 @@ int main() {
     td.columns = { {"id",DataType::INT32}, {"name",DataType::VARCHAR}, {"age",DataType::INT32} };
     cat.create_table(td);
 
-    // ① 程序实例用例
-    //std::string demo =
-    //    "/* test_sql_program */\n"
-    //    "SELECT name, age\n"
-    //    "FROM Students\n"
-    //    "WHERE age > 20; -- only adults\n";
-    //run_one(demo, /*start_line*/1, cat);
+    // 多语句串：按行号切分执行
+    std::string sql_all =
+        "/* demo */\n"
+        "CREATE TABLE course(cid INT, title VARCHAR);\n"
+        "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
+        "SELECT name FROM student;\n"
+        "DELETE FROM student WHERE id = 1;\n";
 
-     //② 正确用例（保持你原来的多行字符串）
+    auto parts = split_sql_with_lines(sql_all);
+    for (auto& [sql, line] : parts) {
+        if (!trim(sql).empty())
+            run_one(sql, line, cat);
+    }
+
+
+    std::cout << "==== SQL compiler end ====\n";
+    return 0;
+    
+    //跑通测试
+    //② 正确用例（保持你原来的多行字符串）
     //std::string ok_sql =
     //    "SELECT name FROM student;";
     //    "CREATE TABLE course(cid INT, title VARCHAR);\n"
@@ -174,7 +185,6 @@ int main() {
     //    if (!trim(sql).empty())
     //        run_one(sql, line, cat);
     //}
-
 
  //   // ③ 错误用例（同样支持跨行定位）
  //   std::vector<std::string> bad = {
@@ -192,14 +202,19 @@ int main() {
  //       line += 1; // 让每条错误用例也能看到不同的起始行号
  //   }
 
-    // 只保留 demo 这一次（不要在后面再喂相同 SQL）
-    std::string demo =
-        "/* test_sql_program */\n"
-        "SELECT name FROM student;\n";
-    run_one(demo, 1, cat);
+    //词法分析测试
+    // ① 程序实例用例
+    //std::string demo =
+    //    "/* test_sql_program */\n"
+    //    "SELECT name, age\n"
+    //    "FROM Students\n"
+    //    "WHERE age > 20; -- only adults\n";
+    //run_one(demo, /*start_line*/1, cat);
 
+    //语法分析测试
+    //std::string demo =
+    //    "/* test_sql_program */\n"
+    //    "SELECT name FROM student;\n";
+    //run_one(demo, 1, cat);
 
-
-    std::cout << "==== SQL compiler end ====\n";
-    return 0;
 }
