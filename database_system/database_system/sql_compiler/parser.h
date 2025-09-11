@@ -15,46 +15,57 @@ namespace minidb {
     public:
         explicit Parser(Lexer& lx) : lx_(lx) {}
 
-        // 主入口：分析一条语句（以 ';' 结尾），失败时 st.ok=false
         StmtPtr parse_statement(Status& st);
 
-        // 可选：启用/禁用“步骤跟踪”，用于展示 [step, rule, lookahead, action]
+        void set_trace(bool on) { trace_on_ = on; }
         void enable_trace(bool on) { trace_on_ = on; }
+
         const std::vector<std::string>& trace_log() const { return trace_; }
         void clear_trace() { trace_.clear(); }
 
     private:
-        // 基本工具
-        Token cur();                 // 查看当前 lookahead
+        // 词法前瞻/匹配
+        Token cur();
         bool is(TokenType t);
-        bool accept(TokenType t);    // 若匹配则前进
+        bool accept(TokenType t);
         bool accept_kw(const char* kw);
         Token expect(TokenType t, Status& st, const char* what);
         Token expect_kw(const char* kw, Status& st, const char* what);
 
-        // 错误恢复：跳到 ';' 或 END（并尽量吃掉 ';'）
         void sync_to_semi();
 
-        // 产生式（递归下降）
+        // 表达式
+        std::unique_ptr<Expr> parse_expr(Status& st);
+        std::unique_ptr<Expr> parse_primary(Status& st);
+
+        // 语句
         StmtPtr parse_create(Status& st);
         StmtPtr parse_insert(Status& st);
         StmtPtr parse_select(Status& st);
         StmtPtr parse_delete(Status& st);
 
-        // 表达式：cmp := primary ( (=|!=|<|<=|>|>=) primary )?
-        std::unique_ptr<Expr> parse_expr(Status& st);
-        std::unique_ptr<Expr> parse_primary(Status& st);
+        // —— 跟踪相关（按老师示例打印） ——
+        void trace_push(const std::string& sym);          // 入栈
+        void trace_pop();                                 // 出栈
+        void trace_use_rule(int rule_no, const std::string& rule);
+        void trace_match(const std::string& what);
+        void trace_match_tok(const Token& matched, const std::string& what); // ★ 新增
+        void trace_accept();                              // 最终接收
+        std::string snapshot_input_until_semi();
+        void trace_print_header_once();
 
-        // 跟踪日志
+        // 可选：保留文字日志缓存（当前不直接打印）
         void trace(const std::string& s);
 
     private:
         Lexer& lx_;
-        Token t_{};
-        bool has_{ false };
+        Token t_{}; bool has_{ false };
 
-        bool trace_on_{ false };
-        std::vector<std::string> trace_;
+        bool trace_on_{ true };
+        int step_{ 0 };
+        std::vector<std::string> stack_;
+        bool printed_header_{ false };
+        std::vector<std::string> trace_;   // <== 之前缺这个导致编译错误
     };
 
 } // namespace minidb

@@ -1,5 +1,6 @@
-C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\storage\cache_manager.cpp;C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\x64\Debug\cache_manager.obj
-C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\storage\file_manager.cpp;C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\x64\Debug\file_manager.obj
-C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\storage\page.cpp;C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\x64\Debug\page.obj
-C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\storage\page_manager.cpp;C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\x64\Debug\page_manager.obj
-C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\tests\test_storage.cpp;C:\Users\que07\Desktop\实训\202509\mini_db\database_system\database_system\x64\Debug\test_storage.obj
+D:\practical\database\database_system\database_system\sql_compiler\lexer.cpp;D:\practical\database\database_system\database_system\x64\Debug\lexer.obj
+D:\practical\database\database_system\database_system\sql_compiler\parser.cpp;D:\practical\database\database_system\database_system\x64\Debug\parser.obj
+D:\practical\database\database_system\database_system\sql_compiler\planner.cpp;D:\practical\database\database_system\database_system\x64\Debug\planner.obj
+D:\practical\database\database_system\database_system\sql_compiler\pretty.cpp;D:\practical\database\database_system\database_system\x64\Debug\pretty.obj
+D:\practical\database\database_system\database_system\sql_compiler\semantic.cpp;D:\practical\database\database_system\database_system\x64\Debug\semantic.obj
+D:\practical\database\database_system\database_system\tests\test_sql.cpp;D:\practical\database\database_system\database_system\x64\Debug\test_sql.obj

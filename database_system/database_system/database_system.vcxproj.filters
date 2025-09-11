@@ -15,16 +15,37 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="storage\cache_manager.hpp">
+    <ClInclude Include="sql_compiler\ast.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="storage\file_manager.hpp">
+    <ClInclude Include="sql_compiler\catalog_adapter_engine.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="storage\page.hpp">
+    <ClInclude Include="sql_compiler\catalog_iface.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="storage\page_manager.hpp">
+    <ClInclude Include="sql_compiler\lexer.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="sql_compiler\parser.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="sql_compiler\planner.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="sql_compiler\pretty.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="sql_compiler\semantic.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\common.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\constants.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\helpers.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
@@ -32,22 +53,28 @@
     <ClCompile Include="cli\main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="storage\cache_manager.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="storage\file_manager.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="storage\page.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="tests\test_db.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="storage\page_manager.cpp">
+    <ClCompile Include="tests\test_storage.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="tests\test_storage.cpp">
+    <ClCompile Include="sql_compiler\lexer.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="sql_compiler\parser.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="sql_compiler\planner.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="sql_compiler\pretty.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="sql_compiler\semantic.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\test_sql.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

@@ -1,5 +1,5 @@
 // =============================================
-// sql_compiler/lexer.cpp
+// sql_compiler/lexer.cpp ´Ê·¨·ÖÎö
 // =============================================
 #include "lexer.h"
 #include <cassert>

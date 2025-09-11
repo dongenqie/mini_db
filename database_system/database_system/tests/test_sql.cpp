@@ -123,15 +123,6 @@ static void run_one(const std::string& sql_src, int start_line, ICatalog& cat) {
     ps.enable_trace(true);                 // 开启步骤跟踪
     auto stmt = ps.parse_statement(pst);
 
-    // 打印“语法分析步骤四元式”
-    {
-        std::cout << "SYNTAX TRACE:\n";
-        const auto& tr = ps.trace_log();
-        for (size_t i = 0; i < tr.size(); ++i) {
-            std::cout << "[" << (i + 1) << "] " << tr[i] << "\n";
-        }
-    }
-
     if (!pst.ok) {
         std::cout << "SYNTAX ERROR: " << pst.message << "\n";
         return;
@@ -171,18 +162,19 @@ int main() {
     //run_one(demo, /*start_line*/1, cat);
 
      //② 正确用例（保持你原来的多行字符串）
-    std::string ok_sql =
-        "SELECT name FROM student;";
+    //std::string ok_sql =
+    //    "SELECT name FROM student;";
     //    "CREATE TABLE course(cid INT, title VARCHAR);\n"
     //    "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
     //    "SELECT id,name FROM student WHERE age > 18;\n"
     //    "DELETE FROM student WHERE id = 1;\n";
 
-    auto parts = split_sql_with_lines(ok_sql);
-    for (auto& [sql, line] : parts) {
-        if (!trim(sql).empty())
-            run_one(sql, line, cat);
-    }
+    //auto parts = split_sql_with_lines(ok_sql);
+    //for (auto& [sql, line] : parts) {
+    //    if (!trim(sql).empty())
+    //        run_one(sql, line, cat);
+    //}
+
 
  //   // ③ 错误用例（同样支持跨行定位）
  //   std::vector<std::string> bad = {
@@ -199,6 +191,12 @@ int main() {
  //       run_one(s, line, cat);
  //       line += 1; // 让每条错误用例也能看到不同的起始行号
  //   }
+
+    // 只保留 demo 这一次（不要在后面再喂相同 SQL）
+    std::string demo =
+        "/* test_sql_program */\n"
+        "SELECT name FROM student;\n";
+    run_one(demo, 1, cat);
 
 
 

@@ -1,5 +1,5 @@
 // =============================================
-// sql_compiler/lexer.h
+// sql_compiler/lexer.h 词法分析
 // =============================================
 #pragma once
 #include "../utils/common.h"
@@ -61,6 +61,26 @@ namespace minidb {
     // --------- Lexer -----------
     class Lexer {
     public:
+        // ---------- 供语法跟踪快照使用的保存/恢复 ----------
+        // === 新增：保存/恢复词法状态（包含 lookahead 缓存） ===
+        struct State {
+            size_t i;
+            int line;
+            int col;
+            bool has;
+            Token la;
+        };
+        State save() const {
+            return State{ i_, line_, col_, has_, la_ };
+        }
+        void restore(const State& st) {
+            i_ = st.i;
+            line_ = st.line;
+            col_ = st.col;
+            has_ = st.has;
+            la_ = st.la;
+        }
+
         // 新增：支持设置起始行/列，以及是否把注释作为 token 返回
         explicit Lexer(const std::string& input,
             int start_line = 1,
