@@ -5,7 +5,7 @@
 #include <memory>
 
 // ==========================
-// Column định nghĩa 1 cột
+// ColumnType định nghĩa kiểu dữ liệu cột
 // ==========================
 enum class ColumnType {
     INT,
@@ -13,13 +13,28 @@ enum class ColumnType {
     VARCHAR
 };
 
+// ==========================
+// Column định nghĩa 1 cột
+// ==========================
 struct Column {
     std::string name;
     ColumnType type;
     int length; // chỉ dùng cho VARCHAR
 
-    Column(const std::string& n, ColumnType t, int len = 0)
-        : name(n), type(t), length(len) {
+    // Constraint cơ bản
+    bool isPrimaryKey;
+    bool isNotNull;
+
+    Column(const std::string& n,
+        ColumnType t,
+        int len = 0,
+        bool pk = false,
+        bool notNull = false)
+        : name(n),
+        type(t),
+        length(len),
+        isPrimaryKey(pk),
+        isNotNull(notNull) {
     }
 };
 
@@ -60,7 +75,9 @@ struct TableInfo {
 // ==========================
 class Catalog {
 public:
-    void AddTable(const std::string& name, const Schema& schema, const std::string& fileName) {
+    void AddTable(const std::string& name,
+        const Schema& schema,
+        const std::string& fileName) {
         tables[name] = std::make_unique<TableInfo>(name, schema, fileName);
     }
 
@@ -95,7 +112,12 @@ public:
 
     bool LoadCatalog(Catalog& catalog);
     bool SaveCatalog(const Catalog& catalog);
-    bool CreateTable(Catalog& catalog, const std::string& tableName, const Schema& schema, const std::string& fileName);
+
+    bool CreateTable(Catalog& catalog,
+        const std::string& tableName,
+        const Schema& schema,
+        const std::string& fileName);
+
     bool DropTable(Catalog& catalog, const std::string& tableName);
 
 private:
