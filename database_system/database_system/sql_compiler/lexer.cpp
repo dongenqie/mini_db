@@ -7,7 +7,13 @@
 namespace minidb {
 
     static std::unordered_set<std::string> KW = {
-        "SELECT","FROM","WHERE","CREATE","TABLE","INSERT","INTO","VALUES","DELETE",
+        "SELECT","FROM","WHERE","CREATE","TABLE",
+        "INSERT","INTO","VALUES","DELETE",
+        // 新增关键字（DML/查询扩展）
+        "UPDATE","SET",
+        "JOIN","INNER","LEFT","RIGHT","FULL","ON",
+        "ORDER","BY","GROUP","HAVING","ASC","DESC",
+        "LIMIT",
         // 类型
         "INT","VARCHAR",
         // 逻辑
@@ -54,24 +60,25 @@ namespace minidb {
         }
     }
 
+    // 空白/注释：加入对 /* ... */ 的跳过
     void Lexer::skip_ws() {
         while (i_ < s_.size()) {
-            char c = look();
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') { adv(); continue; }
-            // 行注释
-            if (!keep_comments_ && c == '-' && look_ahead(1) == '-') {
-                while (i_ < s_.size() && look() != '\n') adv();
+            char c = s_[i_];
+            // -- 行注释
+            if (c == '-' && i_ + 1 < s_.size() && s_[i_ + 1] == '-') {
+                while (i_ < s_.size() && s_[i_] != '\n') adv();
                 continue;
             }
-            // 块注释
-            if (!keep_comments_ && c == '/' && look_ahead(1) == '*') {
+            // /* 块注释 */
+            if (c == '/' && i_ + 1 < s_.size() && s_[i_ + 1] == '*') {
                 adv(); adv(); // 吃掉 "/*"
                 while (i_ < s_.size()) {
-                    if (look() == '*' && look_ahead(1) == '/') { adv(); adv(); break; }
+                    if (s_[i_] == '*' && i_ + 1 < s_.size() && s_[i_ + 1] == '/') { adv(); adv(); break; }
                     adv();
                 }
                 continue;
             }
+            if (isspace((unsigned char)c)) { adv(); continue; }
             break;
         }
     }

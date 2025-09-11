@@ -58,6 +58,8 @@ namespace minidb {
 
     bool is_keyword_upper(const std::string& up);
 
+    // 新增：把新关键字补全（只声明，不实现）
+
     // --------- Lexer -----------
     class Lexer {
     public:

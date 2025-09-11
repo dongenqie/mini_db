@@ -153,20 +153,29 @@ int main() {
     td.columns = { {"id",DataType::INT32}, {"name",DataType::VARCHAR}, {"age",DataType::INT32} };
     cat.create_table(td);
 
-    // 多语句串：按行号切分执行
-    std::string sql_all =
-        "/* demo */\n"
+    std::string all =
+        "/* 正确用例 */\n"
         "CREATE TABLE course(cid INT, title VARCHAR);\n"
         "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
-        "SELECT name FROM student;\n"
-        "DELETE FROM student WHERE id = 1;\n";
+        "INSERT INTO student VALUES (2,'Bob',19);\n"                 // 未给列清单，按表列顺序；数量=3
+        "SELECT Name, AGE FROM Student WHERE age >= 20;\n"          // 大小写不敏感
+        "SELECT student.name FROM student WHERE id = 1;\n"          // 限定列名 a.b
+        "DELETE FROM student WHERE id = 999;\n"                      // 语义OK（虽然没匹配行）
+        "\n"
+        "/* 语义错误用例 */\n"
+        "CREATE TABLE student(id INT); \n"                           // 表已存在
+        "INSERT INTO student(id,name,age) VALUES (3,'Carol');\n"     // 个数不一致
+        "INSERT INTO student(id,name,age) VALUES (4,20,19);\n"       // 类型不匹配：name 用了 INT
+        "SELECT not_exist FROM student;\n"                           // 列不存在
+        "UPDATE student SET notExist = 1 WHERE id = 1; \n"           // 开启 UPDATE 语义后再放开
+        ;
 
-    auto parts = split_sql_with_lines(sql_all);
+    auto parts = split_sql_with_lines(all);
     for (auto& [sql, line] : parts) {
-        if (!trim(sql).empty())
-            run_one(sql, line, cat);
+        if (!trim(sql).empty()) {
+            run_one(sql, line, cat);   // 这里会打印 TOKENS / TRACE / AST / 语义错误
+        }
     }
-
 
     std::cout << "==== SQL compiler end ====\n";
     return 0;
@@ -217,4 +226,35 @@ int main() {
     //    "SELECT name FROM student;\n";
     //run_one(demo, 1, cat);
 
+    // 多语句串：按行号切分执行
+    //std::string sql_all =
+    //    "/* demo */\n"
+    //    "CREATE TABLE course(cid INT, title VARCHAR);\n"
+    //    "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
+    //    "SELECT name FROM student;\n"
+    //   "DELETE FROM student WHERE id = 1;\n";
+
+    //auto parts = split_sql_with_lines(sql_all);
+    //for (auto& [sql, line] : parts) {
+    //    if (!trim(sql).empty())
+    //        run_one(sql, line, cat);
+    //}
+
+    //std::string all =
+        //"/* 正确用例 */\n"
+        //"CREATE TABLE course(cid INT, title VARCHAR);\n"
+        //"INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
+        //"UPDATE student SET age = 21, name = 'Alice-2' WHERE id = 1;\n"
+        //"SELECT name FROM student;\n"
+        //"SELECT s.name FROM student s INNER JOIN course ON s.id = cid ORDER BY name DESC;\n"
+        //"SELECT id, name FROM student GROUP BY id, name HAVING id = 1 ORDER BY name;\n"
+        //"DELETE FROM student WHERE id = 1;\n"
+        //"\n"
+        //"/* 常见错误用例 */\n"
+        //"SELECT id FROM student\n"                 // 缺分号
+        //"INSERT INTO student(id,name,age) VALUES (2, 20, 19);\n" // 类型不匹配（name 用了 INT）
+        //"INSERT INTO student(id,name,age) VALUES (3,'Bob');\n"   // 个数不一致
+        //"INSERT INTO student(id,name,age) VALUES (4,'Bob,19);\n" // 未闭合字符串
+        //"UPDATE student SET notExist = 1 WHERE id = 1; \n"       // 列名拼写（语义阶段报）
+        //;
 }

@@ -19,6 +19,24 @@ namespace minidb {
         if (trace_on_) trace_.push_back(s);
     }
 
+    bool Parser::parse_qualified_name(std::string& out) {
+        Status dummy = Status::OK();
+        Token first = cur();
+        if (first.type != TokenType::IDENT) return false;
+        accept(TokenType::IDENT);
+        out = first.lexeme;
+
+        if (is(TokenType::DOT)) {
+            accept(TokenType::DOT);
+            Token second = cur();
+            if (second.type != TokenType::IDENT) return false;
+            accept(TokenType::IDENT);
+            out += ".";
+            out += second.lexeme;
+        }
+        return true;
+    }
+
     // ---------- 词法前瞻 ----------
     Token Parser::cur() {
         if (!has_) { t_ = lx_.next(); has_ = true; }
@@ -59,6 +77,24 @@ namespace minidb {
         }
         has_ = false;
         return tk;
+    }
+
+    void Parser::expect_or_sync(Status& st, const char* expected_msg) {
+        Token tk = cur();
+        std::ostringstream os;
+        os << "Syntax error at " << tk.line << ":" << tk.col
+            << " : expected " << expected_msg
+            << ", got \"" << tk.lexeme << "\"";
+        st = Status::Error(os.str());
+        // 追踪一行错误（不强制，但便于排查）
+        if (trace_on_) {
+            ++step_;
+            std::cout << "[" << step_ << "] "
+                << snapshot_input_until_semi()
+                << ", ERROR " << expected_msg
+                << " but got \"" << tk.lexeme << "\"]\n";
+        }
+        sync_to_semi(); // 关键：同步到 ';'
     }
 
     // ============ 跟踪输出 ============
@@ -251,6 +287,7 @@ namespace minidb {
         if (tk.lexeme == "INSERT") return parse_insert(st);
         if (tk.lexeme == "SELECT") return parse_select(st);
         if (tk.lexeme == "DELETE") return parse_delete(st);
+        if (tk.lexeme == "UPDATE") return parse_update(st);   // <== 新增
 
         st = Status::Error("Unknown statement at " + pos_str(tk) + " : " + tk.lexeme);
         sync_to_semi();
@@ -449,6 +486,9 @@ namespace minidb {
                 << "(4) Tbl -> ID\n";
         }
 
+        // 构造 SelectStmt 对象（！！非常关键，以便后面 joins/group/order 能引用到）
+        auto s = std::make_unique<SelectStmt>();
+
         trace_push("Prog");
         trace_use_rule(1, "Prog -> Query ';'");
         trace_use_rule(2, "Query -> SELECT SelList FROM Tbl");
@@ -460,27 +500,74 @@ namespace minidb {
 
         // SelList
         std::vector<std::string> cols; bool star = false;
-        // 只按老师规则：SelList -> ID（保留 * 的兼容可自行扩展）
-        trace_use_rule(3, "SelList -> ID");
-        Token c = expect(TokenType::IDENT, st, "column");
-        if (!st.ok) return nullptr;
-        cols.push_back(c.lexeme);
-        trace_match_tok(c, "ID(" + c.lexeme + ")");
 
-        // 允许额外的 , ID …（这部分非规则清单的扩展）
-        while (accept(TokenType::COMMA)) {
-            Token commaTok{ TokenType::COMMA, ",", c.line, c.col };
-            trace_match_tok(commaTok, ",");
-            Token c2 = expect(TokenType::IDENT, st, "column");
+        if (is(TokenType::STAR)) {
+            trace_use_rule(3, "SelList -> *");
+            Token starTk = expect(TokenType::STAR, st, "*");
             if (!st.ok) return nullptr;
-            cols.push_back(c2.lexeme);
-            trace_match_tok(c2, "ID(" + c2.lexeme + ")");
+            trace_match_tok(starTk, "*");
+            star = true;
+        }
+        else {
+            trace_use_rule(3, "SelList -> ID");
+
+            // 解析第一个选择项：支持 ID('.'ID)?
+            {
+                Token c1 = expect(TokenType::IDENT, st, "column");
+                if (!st.ok) return nullptr;
+
+                std::string item = c1.lexeme;
+                trace_match_tok(c1, "ID(" + c1.lexeme + ")");
+
+                if (is(TokenType::DOT)) {
+                    Token dot = expect(TokenType::DOT, st, "'.'");
+                    if (!st.ok) return nullptr;
+                    trace_match_tok(dot, "'.'");
+
+                    Token c2 = expect(TokenType::IDENT, st, "column");
+                    if (!st.ok) return nullptr;
+                    trace_match_tok(c2, "ID(" + c2.lexeme + ")");
+
+                    item += ".";
+                    item += c2.lexeme;
+                }
+                cols.push_back(item);
+            }
+
+            // 后续：, ID('.'ID)? 重复
+            while (is(TokenType::COMMA)) {
+                Token comma = expect(TokenType::COMMA, st, "','");
+                if (!st.ok) return nullptr;
+                trace_match_tok(comma, "','");
+
+                Token c = expect(TokenType::IDENT, st, "column");
+                if (!st.ok) return nullptr;
+
+                std::string item = c.lexeme;
+                trace_match_tok(c, "ID(" + c.lexeme + ")");
+
+                if (is(TokenType::DOT)) {
+                    Token dot = expect(TokenType::DOT, st, "'.'");
+                    if (!st.ok) return nullptr;
+                    trace_match_tok(dot, "'.'");
+
+                    Token c2 = expect(TokenType::IDENT, st, "column");
+                    if (!st.ok) return nullptr;
+                    trace_match_tok(c2, "ID(" + c2.lexeme + ")");
+
+                    item += ".";
+                    item += c2.lexeme;
+                }
+                cols.push_back(item);
+            }
         }
 
         // FROM
-        Token kwFrom = expect_kw("FROM", st, "FROM");
-        if (!st.ok) return nullptr;
-        trace_match_tok(kwFrom, "FROM");
+        {
+            Token fromTk = expect_kw("FROM", st, "FROM");
+            if (!st.ok) return nullptr;
+            trace_match_tok(fromTk, "FROM");
+        }
 
         // Tbl -> ID
         trace_use_rule(4, "Tbl -> ID");
@@ -488,23 +575,68 @@ namespace minidb {
         if (!st.ok) return nullptr;
         trace_match_tok(tn, "ID(" + tn.lexeme + ")");
 
-        // 可选 WHERE（如要规范打印，也可仿照上面做 expect/trace_match_tok）
-        if (accept_kw("WHERE")) {
-            Token kwWhere{ TokenType::KEYWORD, "WHERE", tn.line, tn.col };
-            trace_match_tok(kwWhere, "WHERE");
-            auto where = parse_expr(st);
+        // FROM 后可选**别名**（不存 AST，只吃掉以便后续 JOIN/ORDER 能正常识别）
+        if (is(TokenType::IDENT)) {
+            Token alias = expect(TokenType::IDENT, st, "alias");
             if (!st.ok) return nullptr;
-            // 这里为了简洁，表达式内部不逐 token 打“匹配”轨迹
+            // 仅用于 trace 展示，避免改 AST
+            trace_match_tok(alias, "ID(" + alias.lexeme + ")");
         }
 
-        // ';'
-        Token semi = expect(TokenType::SEMI, st, "';'");
+        // WHERE（可选）
+        std::unique_ptr<Expr> where;
+        if (is(TokenType::KEYWORD) && cur().lexeme == "WHERE") {
+            Token whereTk = expect(TokenType::KEYWORD, st, "WHERE");
+            if (!st.ok) return nullptr;
+            trace_match_tok(whereTk, "WHERE");
+
+            where = parse_expr(st);
+            if (!st.ok) return nullptr;
+
+            // 仅用于输出一步“匹配 expr”，不改变词法游标
+            Token fakeExpr{ TokenType::IDENT, "expr", cur().line, cur().col };
+            trace_match_tok(fakeExpr, "expr");
+        }
+
+        // ====== 这里是关键：把 s 的字段先落下，后续扩展都往 s 上填 ======
+        s->table = tn.lexeme;
+        s->columns = std::move(cols);
+        s->star = star;
+        s->where = std::move(where);
+
+        // ====== 关键新增：SELECT 尾部扩展 ======
+    // 1) JOIN 串
+        if (!parse_joins(st, s->joins)) return nullptr;
         if (!st.ok) return nullptr;
-        trace_match_tok(semi, "';'");
+
+        // 2) GROUP BY
+        if (!parse_group_by(st, s->group_by)) return nullptr;
+        if (!st.ok) return nullptr;
+
+        // 2.5) HAVING（在你现有接口外补一句，极小改动）
+        if (accept_kw("HAVING")) {
+            Token kwHaving{ TokenType::KEYWORD, "HAVING", tn.line, tn.col };
+            trace_match_tok(kwHaving, "HAVING");
+            s->having = parse_expr(st);
+            if (!st.ok) return nullptr;
+            Token exprTok{ TokenType::IDENT, "expr", cur().line, cur().col };
+            trace_match_tok(exprTok, "expr");
+        }
+
+        // 3) ORDER BY
+        if (!parse_order_by(st, s->order_by)) return nullptr;
+        if (!st.ok) return nullptr;
+
+        // ';'
+        {
+            Token semi = expect(TokenType::SEMI, st, "';'");
+            if (!st.ok) return nullptr;
+            trace_match_tok(semi, "';'");
+        }
+
+        // 接受
         trace_accept();
 
-        auto s = std::make_unique<SelectStmt>();
-        s->table = tn.lexeme; s->columns = std::move(cols); s->star = star;
         return s;
     }
 
@@ -562,13 +694,211 @@ namespace minidb {
         return d;
     }
 
+    // ============== UPDATE ==============
+    StmtPtr Parser::parse_update(Status& st) {
+        if (trace_on_) {
+            std::cout
+                << " ============== 规则清单 ==============\n"
+                << "(1) Prog -> Update ';'\n"
+                << "(2) Update -> UPDATE Tbl SET AssignList OptWhere\n"
+                << "(3) Tbl -> ID\n"
+                << "(4) AssignList -> Assign (',' Assign)*\n"
+                << "(5) Assign -> ID '=' Expr\n"
+                << "(6) OptWhere -> WHERE Expr | ε\n";
+        }
+
+        trace_push("Prog");
+        trace_use_rule(1, "Prog -> Update ';'");
+        trace_use_rule(2, "Update -> UPDATE Tbl SET AssignList OptWhere");
+
+        // UPDATE
+        Token kwUp = expect_kw("UPDATE", st, "UPDATE"); if (!st.ok) return nullptr;
+        trace_match_tok(kwUp, "UPDATE");
+
+        // Tbl -> ID
+        trace_use_rule(3, "Tbl -> ID");
+        Token tn = expect(TokenType::IDENT, st, "table"); if (!st.ok) return nullptr;
+        trace_match_tok(tn, "ID(" + tn.lexeme + ")");
+
+        // SET
+        Token kwSet = expect_kw("SET", st, "SET"); if (!st.ok) return nullptr;
+        trace_match_tok(kwSet, "SET");
+
+        // AssignList
+        trace_use_rule(4, "AssignList -> Assign (',' Assign)*");
+
+        std::vector<std::pair<std::string, std::unique_ptr<Expr>>> sets;
+
+        // Assign -> ID '=' Expr
+        while (true) {
+            trace_use_rule(5, "Assign -> ID '=' Expr");
+            Token col = expect(TokenType::IDENT, st, "column"); if (!st.ok) return nullptr;
+            trace_match_tok(col, "ID(" + col.lexeme + ")");
+
+            Token eq = expect(TokenType::EQ, st, "'='"); if (!st.ok) return nullptr;
+            trace_match_tok(eq, "'='");
+
+            auto e = parse_expr(st); if (!st.ok) return nullptr;
+            // 展示用
+            Token exprTok{ TokenType::IDENT, "expr", cur().line, cur().col };
+            trace_match_tok(exprTok, "expr");
+
+            sets.push_back({ col.lexeme, std::move(e) });
+
+            if (accept(TokenType::COMMA)) {
+                Token comma{ TokenType::COMMA, ",", eq.line, eq.col };
+                trace_match_tok(comma, "','");
+                continue;
+            }
+            break;
+        }
+
+        // OptWhere
+        std::unique_ptr<Expr> where;
+        if (accept_kw("WHERE")) {
+            Token fake{ TokenType::KEYWORD, "WHERE", tn.line, tn.col };
+            trace_use_rule(6, "OptWhere -> WHERE Expr");
+            trace_match_tok(fake, "WHERE");
+            where = parse_expr(st); if (!st.ok) return nullptr;
+            Token exprTok{ TokenType::IDENT, "expr", cur().line, cur().col };
+            trace_match_tok(exprTok, "expr");
+        }
+        else {
+            trace_use_rule(6, "OptWhere -> ε");
+        }
+
+        // ';'
+        if (!accept(TokenType::SEMI)) { expect_or_sync(st, "';'"); return nullptr; }
+        Token semi{ TokenType::SEMI, ";", cur().line, cur().col };
+        trace_match_tok(semi, "';'");
+        trace_accept();
+
+        auto u = std::make_unique<UpdateStmt>();
+        u->table = tn.lexeme;
+        u->sets = std::move(sets);
+        u->where = std::move(where);
+        return u;
+    }
+
+    // —— JOIN 列表： (INNER|LEFT|RIGHT|FULL)? JOIN ID ON Expr 反复 —— 
+    bool Parser::parse_joins(Status& st, std::vector<SelectJoin>& joins) {
+        while (true) {
+            // 预判是否出现 JOIN
+            Token tk = cur();
+            if (tk.type != TokenType::KEYWORD) break;
+
+            JoinType jt = JoinType::INNER; // 默认 INNER
+            if (accept_kw("INNER")) jt = JoinType::INNER;
+            else if (accept_kw("LEFT"))  jt = JoinType::LEFT;
+            else if (accept_kw("RIGHT")) jt = JoinType::RIGHT;
+            else if (accept_kw("FULL"))  jt = JoinType::FULL;
+            // else: 无限定词，视为直接 JOIN
+
+            if (!accept_kw("JOIN")) {
+                // 没 JOIN，回退前面错误？这里当作无 JOIN 结束
+                //（因为前面的 INNER/LEFT/RIGHT/FULL 如果出现但后面没有 JOIN，会在 expect_kw("JOIN") 时报错）
+                if (jt != JoinType::INNER) { expect_or_sync(st, "JOIN"); return false; }
+                break;
+            }
+            Token fakeJoin{ TokenType::KEYWORD, "JOIN", tk.line, tk.col };
+            trace_match_tok(fakeJoin, "JOIN");
+
+            // 表名
+            Token tb = expect(TokenType::IDENT, st, "table"); if (!st.ok) return false;
+            trace_match_tok(tb, "ID(" + tb.lexeme + ")");
+
+            // ON
+            Token onkw = expect_kw("ON", st, "ON"); if (!st.ok) return false;
+            trace_match_tok(onkw, "ON");
+
+            auto e = parse_expr(st); if (!st.ok) return false;
+            Token exprTok{ TokenType::IDENT, "expr", cur().line, cur().col };
+            trace_match_tok(exprTok, "expr");
+
+            SelectJoin sj;
+            sj.type = jt;
+            sj.table = tb.lexeme;
+            // 如果你的 SelectJoin 里有 alias 字段且你在上面读了别名，可选：sj.alias = alias;
+            sj.on = std::move(e);
+            joins.push_back(std::move(sj));
+        }
+        return true;
+    }
+
+    // —— GROUP BY col (, col)* (HAVING Expr)? —— 
+    bool Parser::parse_group_by(Status& st, std::vector<std::string>& out) {
+        if (!accept_kw("GROUP")) return true;    // 没有 GROUP -> 正常返回
+        Token kwG{ TokenType::KEYWORD, "GROUP", cur().line, cur().col };
+        trace_match_tok(kwG, "GROUP");
+
+        Token kwB = expect_kw("BY", st, "BY"); if (!st.ok) return false;
+        trace_match_tok(kwB, "BY");
+
+        Token c1 = expect(TokenType::IDENT, st, "group-by column"); if (!st.ok) return false;
+        out.push_back(c1.lexeme);
+        trace_match_tok(c1, "ID(" + c1.lexeme + ")");
+
+        while (accept(TokenType::COMMA)) {
+            Token comma{ TokenType::COMMA, ",", c1.line, c1.col };
+            trace_match_tok(comma, "','");
+            Token ci = expect(TokenType::IDENT, st, "group-by column"); if (!st.ok) return false;
+            out.push_back(ci.lexeme);
+            trace_match_tok(ci, "ID(" + ci.lexeme + ")");
+        }
+        return true;
+    }
+
+    // —— ORDER BY col (ASC|DESC)? (, ...)* —— 
+    bool Parser::parse_order_by(Status& st, std::vector<OrderItem>& out) {
+        if (!accept_kw("ORDER")) return true;    // 没有 ORDER -> 正常返回
+        Token kwO{ TokenType::KEYWORD, "ORDER", cur().line, cur().col };
+        trace_match_tok(kwO, "ORDER");
+
+        Token kwB = expect_kw("BY", st, "BY"); if (!st.ok) return false;
+        trace_match_tok(kwB, "BY");
+
+        // 第一项
+        Token c1 = expect(TokenType::IDENT, st, "order-by column"); if (!st.ok) return false;
+        trace_match_tok(c1, "ID(" + c1.lexeme + ")");
+        bool asc = true;
+        if (accept_kw("ASC")) { Token t{ TokenType::KEYWORD,"ASC",c1.line,c1.col }; trace_match_tok(t, "ASC"); asc = true; }
+        else if (accept_kw("DESC")) { Token t{ TokenType::KEYWORD,"DESC",c1.line,c1.col }; trace_match_tok(t, "DESC"); asc = false; }
+        out.push_back(OrderItem{ c1.lexeme, asc });
+
+        while (accept(TokenType::COMMA)) {
+            Token comma{ TokenType::COMMA, ",", c1.line, c1.col };
+            trace_match_tok(comma, "','");
+
+            Token ci = expect(TokenType::IDENT, st, "order-by column"); if (!st.ok) return false;
+            trace_match_tok(ci, "ID(" + ci.lexeme + ")");
+            bool asc2 = true;
+            if (accept_kw("ASC")) { Token t{ TokenType::KEYWORD,"ASC",ci.line,ci.col }; trace_match_tok(t, "ASC"); asc2 = true; }
+            else if (accept_kw("DESC")) { Token t{ TokenType::KEYWORD,"DESC",ci.line,ci.col }; trace_match_tok(t, "DESC"); asc2 = false; }
+            out.push_back(OrderItem{ ci.lexeme, asc2 });
+        }
+        return true;
+    }
+
     // ---------- 表达式 ----------
+    // ==== 覆盖 parse_primary：支持 a.b ====
     std::unique_ptr<Expr> Parser::parse_primary(Status& st) {
         Token tk = cur();
-        if (tk.type == TokenType::IDENT) { has_ = false; trace(std::string("primary ColRef '") + tk.lexeme + "' @" + pos_str(tk)); return std::make_unique<ColRef>(tk.lexeme); }
-        if (tk.type == TokenType::INTCONST) { has_ = false; trace(std::string("primary Int ") + tk.lexeme + " @" + pos_str(tk));     return std::make_unique<IntLit>(std::stoi(tk.lexeme)); }
-        if (tk.type == TokenType::STRCONST) { has_ = false; trace(std::string("primary Str \"") + tk.lexeme + "\" @" + pos_str(tk)); return std::make_unique<StrLit>(tk.lexeme); }
-        st = Status::Error("Syntax error at " + pos_str(tk) + " : expected identifier/int/string");
+        if (tk.type == TokenType::IDENT) {
+            // 先吃掉第一个 ident
+            has_ = false;
+            std::string name = tk.lexeme;
+            // 看是否跟着 "."
+            if (cur().type == TokenType::DOT) {
+                has_ = false; // 吃掉 DOT
+                Token id2 = expect(TokenType::IDENT, st, "identifier"); if (!st.ok) return nullptr;
+                name += ".";
+                name += id2.lexeme;
+            }
+            return std::make_unique<ColRef>(name);
+        }
+        if (tk.type == TokenType::INTCONST) { has_ = false; return std::make_unique<IntLit>(std::stoi(tk.lexeme)); }
+        if (tk.type == TokenType::STRCONST) { has_ = false; return std::make_unique<StrLit>(tk.lexeme); }
+        st = Status::Error("Expected primary expr");
         return nullptr;
     }
 

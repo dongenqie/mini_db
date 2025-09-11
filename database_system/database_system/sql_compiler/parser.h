@@ -29,8 +29,11 @@ namespace minidb {
         bool is(TokenType t);
         bool accept(TokenType t);
         bool accept_kw(const char* kw);
+
+        // —— 统一“强 expect”接口：带详细错误 + trace + 同步恢复 —— 
         Token expect(TokenType t, Status& st, const char* what);
         Token expect_kw(const char* kw, Status& st, const char* what);
+        void expect_or_sync(Status& st, const char* expected_msg);
 
         void sync_to_semi();
 
@@ -43,13 +46,21 @@ namespace minidb {
         StmtPtr parse_insert(Status& st);
         StmtPtr parse_select(Status& st);
         StmtPtr parse_delete(Status& st);
+        // —— 新增 —— 
+        StmtPtr parse_update(Status& st);
+
+        // —— SELECT 扩展的子过程 —— 
+        bool parse_qualified_name(std::string& out);
+        bool parse_joins(Status& st, std::vector<SelectJoin>& joins);
+        bool parse_group_by(Status& st, std::vector<std::string>& out);
+        bool parse_order_by(Status& st, std::vector<OrderItem>& out);
 
         // —— 跟踪相关（按老师示例打印） ——
         void trace_push(const std::string& sym);          // 入栈
         void trace_pop();                                 // 出栈
         void trace_use_rule(int rule_no, const std::string& rule);
         void trace_match(const std::string& what);
-        void trace_match_tok(const Token& matched, const std::string& what); // ★ 新增
+        void trace_match_tok(const Token& matched, const std::string& what);
         void trace_accept();                              // 最终接收
         std::string snapshot_input_until_semi();
         void trace_print_header_once();

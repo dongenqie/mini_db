@@ -9,7 +9,6 @@ namespace minidb {
 
     // 表达式基类
     struct Expr { virtual ~Expr() = default; };
-
     // 标识符、常量
     struct ColRef : Expr { std::string name; explicit ColRef(std::string n) : name(std::move(n)) {} };
     struct IntLit : Expr { int32_t v; explicit IntLit(int32_t x) : v(x) {} };
@@ -34,16 +33,39 @@ namespace minidb {
         std::vector<std::unique_ptr<Expr>> values;        // VALUES(...) 内的表达式（这里只支持字面量）
     };
 
-    struct SelectStmt : Stmt {
-        std::string table;
-        std::vector<std::string> columns; // star==true 时忽略
-        bool star{ false };
-        std::unique_ptr<Expr> where;      // 可为空
-    };
-
     struct DeleteStmt : Stmt {
         std::string table;
         std::unique_ptr<Expr> where;      // 可为空
+    };
+
+    // ===== 新增：SELECT 扩展 =====
+    struct OrderItem { std::string column; bool asc{ true }; };
+    enum class JoinType { INNER, LEFT, RIGHT, FULL };
+    struct SelectJoin {
+        JoinType type{ JoinType::INNER };
+        std::string table;      // 被连接表（字符串即可）
+        std::string alias;      // 可选别名
+        std::unique_ptr<Expr> on;
+    };
+
+    struct SelectStmt :Stmt {
+        std::string table;                // 主表
+        std::string alias;                // 主表别名（可空）
+        std::vector<std::string> columns; // 选列（star=true 表示 *）
+        bool star{ false };
+        std::unique_ptr<Expr> where;      // WHERE（可空）
+
+        std::vector<SelectJoin> joins;    // JOIN 列表
+        std::vector<std::string> group_by;
+        std::unique_ptr<Expr> having;
+        std::vector<OrderItem> order_by;
+    };
+    
+    // 新增：UPDATE 语句
+    struct UpdateStmt : Stmt {
+        std::string table;
+        std::vector<std::pair<std::string, std::unique_ptr<Expr>>> sets;
+        std::unique_ptr<Expr> where;
     };
 
     using StmtPtr = std::unique_ptr<Stmt>;
