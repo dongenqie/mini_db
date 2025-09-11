@@ -2,7 +2,43 @@
 // sql_compiler/semantic.cpp
 // =============================================
 #include "semantic.h"
+#include "../utils/common.h"   
 #include <unordered_set>
+#include <sstream>
+
+// ---- 辅助：比较运算符转字符串 + 表达式转字符串（用于四元式打印） ----
+namespace {
+    using namespace minidb;
+
+    static std::string cmpop_to_str(CmpOp op) {
+        switch (op) {
+        case CmpOp::EQ:  return "==";
+        case CmpOp::NEQ: return "!=";
+        case CmpOp::LT:  return "<";
+        case CmpOp::LE:  return "<=";
+        case CmpOp::GT:  return ">";
+        case CmpOp::GE:  return ">=";
+        }
+        return "?";
+    }
+
+    // 你在 SELECT/DELETE/UPDATE 的四元式里调用的 render_expr 就是它
+    static std::string render_expr(const Expr* e) {
+        if (!e) return "-";
+        if (auto c = dynamic_cast<const ColRef*>(e))  return c->name;
+        if (auto i = dynamic_cast<const IntLit*>(e))  return std::to_string(i->v);
+        if (auto s = dynamic_cast<const StrLit*>(e))  return "'" + s->v + "'";
+        if (auto cmp = dynamic_cast<const CmpExpr*>(e)) {
+            std::ostringstream os;
+            os << "("
+                << render_expr(cmp->lhs.get()) << " "
+                << cmpop_to_str(cmp->op) << " "
+                << render_expr(cmp->rhs.get()) << ")";
+            return os.str();
+        }
+        return "expr";
+    }
+} // anonymous namespace
 
 namespace minidb {
 
@@ -40,8 +76,7 @@ namespace minidb {
                 st = Status::Error("[SemanticError, expression, Type mismatch in comparison]");
                 return std::nullopt;
             }
-            // 谓词一律归为 INT32(0/1)，便于后续阶段处理
-            return DataType::INT32;
+            return DataType::INT32; // bool
         }
         st = Status::Error("[SemanticError, expression, Unsupported expression]");
         return std::nullopt;
@@ -49,7 +84,7 @@ namespace minidb {
 
     // —— CREATE —— //
     Status SemanticAnalyzer::check_create(const CreateTableStmt* s, std::vector<Quad>& q) {
-        if (cat_.get_table(s->def.name))
+        if (cat_.get_table(to_lower(s->def.name)))
             return Status::Error("[SemanticError, table, Table already exists: " + s->def.name + "]");
         if (s->def.columns.empty())
             return Status::Error("[SemanticError, column, Empty column list]");
@@ -61,13 +96,37 @@ namespace minidb {
             if (!seen.insert(key).second)
                 return Status::Error("[SemanticError, column, Duplicate column: " + c.name + "]");
         }
-        q.push_back({ "CREATE", s->def.name, "-", "-" });
+        // 过程：逐个列产生 COLDEF，再 CREATE，再 RESULT 汇总
+        std::vector<std::string> t_list;
+        auto next_tmp = [&]() {
+            return std::string("T") + std::to_string((int)q.size());
+            };
+
+        for (auto& c : s->def.columns) {
+            std::string t = next_tmp();
+            q.push_back(Quad{ "COLDEF",
+                              c.name,
+                              (c.type == DataType::INT32 ? "INT" : "VARCHAR"),
+                              t });
+            t_list.push_back(t);
+        }
+
+        q.push_back(Quad{ "CREATE", s->def.name, "-", "-" });
+
+        // RESULT: T0,T1,... 代表列定义过程
+        std::string arg1;
+        for (size_t i = 0; i < t_list.size(); ++i) {
+            if (i) arg1 += ",";
+            arg1 += t_list[i];
+        }
+        q.push_back(Quad{ "RESULT", arg1, "-" });
+
         return Status::OK();
     }
 
     // —— INSERT —— //
     Status SemanticAnalyzer::check_insert(const InsertStmt* s, std::vector<Quad>& q) {
-        auto tdopt = cat_.get_table(s->table);
+        auto tdopt = cat_.get_table(to_lower(s->table));
         if (!tdopt)
             return Status::Error("[SemanticError, table, Unknown table: " + s->table + "]");
         auto td = *tdopt;
@@ -101,42 +160,89 @@ namespace minidb {
             }
         }
 
-        // 展示四元式
+        // 过程：对每个值先生成 CONST，拿到 T?；再按列生成 INSERT col, <literal>, T?
+        auto next_tmp = [&]() {
+            return std::string("T") + std::to_string((int)q.size());
+            };
+        std::vector<std::string> value_tmps;
+        value_tmps.reserve(s->values.size());
+
+        // 1) CONST 四元式：把字面量渲染到 arg1
+        auto render_expr = [](const Expr* e) -> std::string {
+            if (auto i = dynamic_cast<const IntLit*>(e))  return std::to_string(i->v);
+            if (auto s = dynamic_cast<const StrLit*>(e))  return "'" + s->v + "'";
+            if (auto c = dynamic_cast<const ColRef*>(e))  return c->name;
+            return "expr";
+            };
+
         for (size_t j = 0; j < s->values.size(); ++j) {
-            q.push_back({ "INSERT", td.columns[pos[j]].name,
-                         (td.columns[pos[j]].type == DataType::INT32 ? "INT" : "VARCHAR"),
-                         "T" + std::to_string((int)j) });
+            std::string lit = render_expr(s->values[j].get());
+            std::string t = next_tmp();
+            q.push_back(Quad{ "CONST", lit, "-", t });
+            value_tmps.push_back(t);
         }
-        q.push_back({ "INTO", td.name, "-", "-" });
+
+        // 2) INSERT（列 ← 值T?）
+        for (size_t j = 0; j < s->values.size(); ++j) {
+            const auto& col = td.columns[pos[j]].name;
+            std::string t = next_tmp();
+            q.push_back(Quad{ "INSERT", col, value_tmps[j], t });
+        }
+
+        // 3) INTO：把所有值 T? 串起来
+        std::string arg1;
+        for (size_t i = 0; i < value_tmps.size(); ++i) {
+            if (i) arg1 += ",";
+            arg1 += value_tmps[i];
+        }
+        q.push_back(Quad{ "INTO", td.name, arg1, "-" });
+
         return Status::OK();
     }
 
     // —— SELECT（单表版：含 where/限定列名；* 支持） —— //
     Status SemanticAnalyzer::check_select(const SelectStmt* s, std::vector<Quad>& q) {
-        auto tdopt = cat_.get_table(s->table);
+        auto tdopt = cat_.get_table(to_lower(s->table));
         if (!tdopt)
             return Status::Error("[SemanticError, table, Unknown table: " + s->table + "]");
         auto td = *tdopt;
+
+        // 记录每一步产生的临时名 T*
+        std::vector<std::string> t_list;
+        auto next_tmp = [&]() {
+            return std::string("T") + std::to_string((int)q.size());
+        };
 
         if (!s->star) {
             for (auto& c : s->columns) {
                 if (!find_col_ci(td, c))
                     return Status::Error("[SemanticError, column, Unknown column: " + c + "]");
-                q.push_back({ "SELECT", c, "-", "T" + std::to_string((int)q.size()) });
+                std::string t = next_tmp();
+                q.push_back(Quad{ "SELECT", c, "-", t });
+                t_list.push_back(t);
             }
         }
         else {
-            q.push_back({ "SELECT", "*", "-", "T0" });
+            std::string t = next_tmp();
+            q.push_back(Quad{ "SELECT", "*", "-", t });
+            t_list.push_back(t);
         }
 
-        q.push_back({ "FROM", td.name, "-", "T" + std::to_string((int)q.size()) });
+        // FROM
+        {
+            std::string t = next_tmp();
+            q.push_back(Quad{ "FROM", td.name, "-", t });
+            t_list.push_back(t);
+        }
 
+        // WHERE（如果有的话，先做类型检查，再记录谓词产生的 T）
+        std::string pred_tmp;
         if (s->where) {
             Status st = Status::OK();
             (void)expr_type(s->where.get(), td, st);
             if (!st.ok) return st;
 
-            // 简洁的四元式渲染
+            // 渲染一个简洁的比较四元式
             if (auto cmp = dynamic_cast<const CmpExpr*>(s->where.get())) {
                 auto lhs = dynamic_cast<ColRef*>(cmp->lhs.get());
                 auto rhs_i = dynamic_cast<IntLit*>(cmp->rhs.get());
@@ -149,40 +255,95 @@ namespace minidb {
                         cmp->op == CmpOp::LT ? "<" :
                         cmp->op == CmpOp::LE ? "<=" :
                         cmp->op == CmpOp::GT ? ">" : ">=");
-                q.push_back({ op, a1, a2, "T" + std::to_string((int)q.size()) });
+                pred_tmp = next_tmp();
+                q.push_back(Quad{ op, a1, a2, pred_tmp });
             }
             else {
-                q.push_back({ "PRED", "expr", "-", "T" + std::to_string((int)q.size()) });
+                pred_tmp = next_tmp();
+                q.push_back(Quad{ "PRED", "expr", "-", pred_tmp });
             }
         }
 
-        q.push_back({ "RESULT", "-", "-", "-" });
+        // 生成 RESULT：把 t_list 用逗号拼接；有 where 时追加 " WHERE T?"
+        std::string arg1;
+        for (size_t i = 0; i < t_list.size(); ++i) {
+            if (i) arg1 += ",";
+            arg1 += t_list[i];
+        }
+        if (!pred_tmp.empty()) {
+            arg1 += " WHERE ";
+            arg1 += pred_tmp;
+        }
+        q.push_back(Quad{ "RESULT", arg1, "-" });
+
         return Status::OK();
     }
 
     // —— DELETE（单表 where） —— //
     Status SemanticAnalyzer::check_delete(const DeleteStmt* s, std::vector<Quad>& q) {
-        auto tdopt = cat_.get_table(s->table);
+        auto tdopt = cat_.get_table(to_lower(s->table));
         if (!tdopt)
             return Status::Error("[SemanticError, table, Unknown table: " + s->table + "]");
+        const TableDef& td = *tdopt;
+        
+        auto next_tmp = [&]() {
+            return std::string("T") + std::to_string((int)q.size());
+            };
+
+        // FROM
+        std::string t_from = next_tmp();
+        q.push_back(Quad{ "FROM", td.name, "-", t_from });
+
+        // WHERE（可选）
+        std::string t_pred;
         if (s->where) {
             Status st = Status::OK();
-            (void)expr_type(s->where.get(), *tdopt, st);
+            (void)expr_type(s->where.get(), td, st);
             if (!st.ok) return st;
-            q.push_back({ "WHERE", "predicate", "-", "-" });
+
+            // 简洁比较四元式
+            if (auto cmp = dynamic_cast<const CmpExpr*>(s->where.get())) {
+                auto lhs = dynamic_cast<ColRef*>(cmp->lhs.get());
+                auto rhs_i = dynamic_cast<IntLit*>(cmp->rhs.get());
+                auto rhs_s = dynamic_cast<StrLit*>(cmp->rhs.get());
+                std::string a1 = lhs ? lhs->name : "expr";
+                std::string a2 = rhs_i ? std::to_string(rhs_i->v) : (rhs_s ? ("'" + rhs_s->v + "'") : "expr");
+                std::string op =
+                    (cmp->op == CmpOp::EQ ? "==" :
+                        cmp->op == CmpOp::NEQ ? "!=" :
+                        cmp->op == CmpOp::LT ? "<" :
+                        cmp->op == CmpOp::LE ? "<=" :
+                        cmp->op == CmpOp::GT ? ">" : ">=");
+                t_pred = next_tmp();
+                q.push_back(Quad{ op, a1, a2, t_pred });
+            }
+            else {
+                t_pred = next_tmp();
+                q.push_back(Quad{ "PRED", "expr", "-", t_pred });
+            }
         }
-        q.push_back({ "DELETE", s->table, "-", "-" });
+
+        // RESULT：T_from [WHERE T_pred]
+        std::string arg1 = t_from;
+        if (!t_pred.empty()) {
+            arg1 += " WHERE ";
+            arg1 += t_pred;
+        }
+        q.push_back(Quad{ "RESULT", arg1, "-", "-" });
+
+        // 最后给出删除动作
+        q.push_back(Quad{ "DELETE", td.name, "-", "-" });
         return Status::OK();
     }
 
     // —— UPDATE —— //
     Status SemanticAnalyzer::check_update(const UpdateStmt* s, std::vector<Quad>& q) {
-        auto tdopt = cat_.get_table(s->table);
+        auto tdopt = cat_.get_table(to_lower(s->table));
         if (!tdopt)
             return Status::Error("[SemanticError, table, Unknown table: " + s->table + "]");
         const TableDef& td = *tdopt;
 
-        // SET 列存在与类型检查
+        // SET 检查 + 四元式
         for (auto& kv : s->sets) {
             const std::string& col = kv.first;
             auto idx = find_col_ci(td, col);
@@ -192,6 +353,9 @@ namespace minidb {
             if (!tmp.ok) return tmp;
             if (!t || *t != td.columns[*idx].type)
                 return Status::Error("[SemanticError, type, Type mismatch for column " + td.columns[*idx].name + "]");
+
+            // 四元式：SET col = expr
+            q.push_back(Quad{ "SET", td.columns[*idx].name, render_expr(kv.second.get()), "-" });
         }
 
         // WHERE 表达式类型检查
@@ -199,7 +363,10 @@ namespace minidb {
             Status st = Status::OK();
             (void)expr_type(s->where.get(), td, st);
             if (!st.ok) return st;
+            q.push_back(Quad{ "WHERE", render_expr(s->where.get()), "-", "-" });
         }
+
+        q.push_back(Quad{ "UPDATE", s->table, "-", "-" });
         return Status::OK();
     }
 

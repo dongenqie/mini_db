@@ -139,6 +139,7 @@
     <ClInclude Include="sql_compiler\ast.h" />
     <ClInclude Include="sql_compiler\catalog_adapter_engine.h" />
     <ClInclude Include="sql_compiler\catalog_iface.h" />
+    <ClInclude Include="sql_compiler\ir.h" />
     <ClInclude Include="sql_compiler\lexer.h" />
     <ClInclude Include="sql_compiler\parser.h" />
     <ClInclude Include="sql_compiler\planner.h" />

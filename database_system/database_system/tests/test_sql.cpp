@@ -132,6 +132,17 @@ static void run_one(const std::string& sql_src, int start_line, ICatalog& cat) {
     // 3) 语义
     SemanticAnalyzer sa(cat);
     auto sem = sa.analyze(stmt.get());
+
+    // >>> 先打印四元式（无论成功失败都先把已生成的步骤吐出来，方便定位）
+    if (!sem.quads.empty()) {
+        std::cout << "SEMANTIC (quads):\n";
+        for (size_t i = 0; i < sem.quads.size(); ++i) {
+            const auto& q = sem.quads[i];
+            std::cout << "  " << i << " (" << q.op << ", "
+                << q.arg1 << ", " << q.arg2 << ", " << q.result << ")\n";
+        }
+    }
+
     if (!sem.status.ok) {
         std::cout << "SEMANTIC ERROR: " << sem.status.message << "\n";
         return;
@@ -157,17 +168,17 @@ int main() {
         "/* 正确用例 */\n"
         "CREATE TABLE course(cid INT, title VARCHAR);\n"
         "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
-        "INSERT INTO student VALUES (2,'Bob',19);\n"                 // 未给列清单，按表列顺序；数量=3
-        "SELECT Name, AGE FROM Student WHERE age >= 20;\n"          // 大小写不敏感
-        "SELECT student.name FROM student WHERE id = 1;\n"          // 限定列名 a.b
+        //"INSERT INTO student VALUES (2,'Bob',19);\n"                 // 未给列清单，按表列顺序；数量=3
+        //"SELECT Name, AGE FROM Student WHERE age >= 20;\n"          // 大小写不敏感
+        //"SELECT student.name FROM student WHERE id = 1;\n"          // 限定列名 a.b
         "DELETE FROM student WHERE id = 999;\n"                      // 语义OK（虽然没匹配行）
-        "\n"
-        "/* 语义错误用例 */\n"
-        "CREATE TABLE student(id INT); \n"                           // 表已存在
-        "INSERT INTO student(id,name,age) VALUES (3,'Carol');\n"     // 个数不一致
-        "INSERT INTO student(id,name,age) VALUES (4,20,19);\n"       // 类型不匹配：name 用了 INT
-        "SELECT not_exist FROM student;\n"                           // 列不存在
-        "UPDATE student SET notExist = 1 WHERE id = 1; \n"           // 开启 UPDATE 语义后再放开
+        //"\n"
+        //"/* 语义错误用例 */\n"
+        //"CREATE TABLE student(id INT); \n"                           // 表已存在
+        //"INSERT INTO student(id,name,age) VALUES (3,'Carol');\n"     // 个数不一致
+        //"INSERT INTO student(id,name,age) VALUES (4,20,19);\n"       // 类型不匹配：name 用了 INT
+        //"SELECT not_exist FROM student;\n"                           // 列不存在
+        //"UPDATE student SET notExist = 1 WHERE id = 1; \n"           // 开启 UPDATE 语义后再放开
         ;
 
     auto parts = split_sql_with_lines(all);

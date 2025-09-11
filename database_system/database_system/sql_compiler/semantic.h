@@ -3,12 +3,13 @@
 // =============================================
 #pragma once
 #include "ast.h"
+#include "ir.h" 
 #include "catalog_iface.h"   
 #include <vector>
+#include <unordered_map>
 
 namespace minidb {
 
-    struct Quad { std::string op, arg1, arg2, result; };  // 四元式展示
     struct SemanticResult { Status status; std::vector<Quad> quads; };
 
     class SemanticAnalyzer {

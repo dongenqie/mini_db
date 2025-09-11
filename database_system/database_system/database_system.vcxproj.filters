@@ -48,6 +48,9 @@
     <ClInclude Include="utils\helpers.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="sql_compiler\ir.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="cli\main.cpp">
