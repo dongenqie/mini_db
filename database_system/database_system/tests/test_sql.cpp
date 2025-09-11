@@ -118,9 +118,20 @@ static void run_one(const std::string& sql_src, int start_line, ICatalog& cat) {
 
     // 2) 语法（AST）
     Status pst = Status::OK();
-    Lexer lx(sql, start_line);   // 解析器也需要同样的起始行
+    Lexer lx(sql, start_line);
     Parser ps(lx);
+    ps.enable_trace(true);                 // 开启步骤跟踪
     auto stmt = ps.parse_statement(pst);
+
+    // 打印“语法分析步骤四元式”
+    {
+        std::cout << "SYNTAX TRACE:\n";
+        const auto& tr = ps.trace_log();
+        for (size_t i = 0; i < tr.size(); ++i) {
+            std::cout << "[" << (i + 1) << "] " << tr[i] << "\n";
+        }
+    }
+
     if (!pst.ok) {
         std::cout << "SYNTAX ERROR: " << pst.message << "\n";
         return;
@@ -152,19 +163,20 @@ int main() {
     cat.create_table(td);
 
     // ① 程序实例用例
-    std::string demo =
-        "/* test_sql_program */\n"
-        "SELECT name, age\n"
-        "FROM Students\n"
-        "WHERE age > 20; -- only adults\n";
-    run_one(demo, /*start_line*/1, cat);
+    //std::string demo =
+    //    "/* test_sql_program */\n"
+    //    "SELECT name, age\n"
+    //    "FROM Students\n"
+    //    "WHERE age > 20; -- only adults\n";
+    //run_one(demo, /*start_line*/1, cat);
 
-    // ② 正确用例（保持你原来的多行字符串）
+     //② 正确用例（保持你原来的多行字符串）
     std::string ok_sql =
-        "CREATE TABLE course(cid INT, title VARCHAR);\n"
-        "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
-        "SELECT id,name FROM student WHERE age > 18;\n"
-        "DELETE FROM student WHERE id = 1;\n";
+        "SELECT name FROM student;";
+    //    "CREATE TABLE course(cid INT, title VARCHAR);\n"
+    //    "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
+    //    "SELECT id,name FROM student WHERE age > 18;\n"
+    //    "DELETE FROM student WHERE id = 1;\n";
 
     auto parts = split_sql_with_lines(ok_sql);
     for (auto& [sql, line] : parts) {
