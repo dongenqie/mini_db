@@ -26,7 +26,7 @@ private:
         if (!file) { // 文件不存在，创建二进制空文件
             ofstream new_file(data_file_path, ios::binary);
             if (!new_file) {
-                throw runtime_error("PageManager init failed: create data file failed - " + data_file_path);
+                throw runtime_error("page_manager.hpp——页管理初始化失败: 创建文件 " + data_file_path + "失败");
             }
             new_file.close();
         }
@@ -36,6 +36,7 @@ private:
     }
 
 public:
+ 
     // 构造函数：初始化数据文件路径、空闲页列表、下一页号
     PageManager(const string& data_path);
 
@@ -58,20 +59,24 @@ public:
     // -------------------------- 辅助接口（供缓存/数据库模块调用） --------------------------
     // 获取空闲页列表（缓存模块判断页是否可复用）
     list<uint32_t> get_free_page_list() const { return free_page_list; }
+    // 设置空闲页列表
+    void set_free_page_list(const std::list<uint32_t>& free_list) {
+        free_page_list = free_list;
+    }
+
+
     // 获取下一页号（元数据持久化时使用）
     uint32_t get_next_page_id() const { return next_page_id; }
-    // 获取数据文件路径（调试用）
-    string get_data_file_path() const { return data_file_path; }
-
     // 设置下一个页号
     void set_next_page_id(uint32_t next_page) {
         next_page_id = next_page;
     }
 
-    // 设置空闲页列表
-    void set_free_page_list(const std::list<uint32_t>& free_list) {
-        free_page_list = free_list;
-    }
+
+    // 获取数据文件路径（调试用）
+    string get_data_file_path() const { return data_file_path; }
+
+   
 };
 
 #endif // PAGE_MANAGER_H#pragma once

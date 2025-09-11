@@ -15,7 +15,7 @@
 
 class FileManager {
 private:
-    std::string db_dir;              // 数据库文件根目录（如./mini_db_files）
+    std::string db_dir;              // 数据库文件根目录
     std::string data_file_path;      // 数据文件完整路径（db_dir + DATA_FILE_NAME）
     std::string meta_file_path;      // 元数据文件完整路径（db_dir + META_FILE_NAME）
 

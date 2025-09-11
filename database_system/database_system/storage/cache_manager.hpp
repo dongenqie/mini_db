@@ -11,7 +11,7 @@
 #include <fstream>
 #include <stdexcept>
 
-// 缓存替换策略（指导书要求支持LRU、FIFO）
+// 缓存替换策略
 enum class ReplacePolicy {
     LRU,    // 最近最少使用
     FIFO    // 先进先出

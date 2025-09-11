@@ -34,8 +34,8 @@ public:
     uint32_t get_page_id() const { return page_id; }
     void set_page_id(uint32_t pid) { page_id = pid; }
 
-    uint32_t get_free_offset() const { return free_offset; }
 
+    uint32_t get_free_offset() const { return free_offset; }
     // 更新空闲偏移（确保不超出页大小，避免数据溢出）
     bool set_free_offset(uint32_t offset) {
         if (offset < PAGE_HEADER_SIZE || offset > PAGE_SIZE) return false;
