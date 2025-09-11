@@ -1,20 +1,46 @@
 ﻿#include "executor.hpp"
 #include <iostream>
 #include <sstream>
+#include <iomanip>
+#include <algorithm>
 
 // ==========================
-// Execute main
+// Parse & Dispatch SQL
 // ==========================
 bool Executor::Execute(const std::string& sql) {
     std::istringstream iss(sql);
     std::string command;
     iss >> command;
 
+    std::transform(command.begin(), command.end(), command.begin(), ::toupper);
+
     if (command == "CREATE") {
         std::string tmp, tableName;
         iss >> tmp >> tableName; // TABLE tableName
-        // TODO: parse columns
+
+        // Parse danh sách cột: (colName type [len], ...)
+        char ch;
+        iss >> ch; // (
         std::vector<Column> columns;
+        while (iss.peek() != ')' && iss.good()) {
+            std::string colName, typeStr;
+            int len = 0;
+            iss >> colName >> typeStr;
+
+            ColumnType type;
+            if (typeStr == "INT") type = ColumnType::INT;
+            else if (typeStr == "FLOAT") type = ColumnType::FLOAT;
+            else {
+                type = ColumnType::VARCHAR;
+                iss >> len; // lấy độ dài
+            }
+
+            columns.emplace_back(colName, type, len);
+
+            if (iss.peek() == ',') iss.ignore();
+        }
+        iss >> ch; // )
+
         return ExecuteCreateTable(tableName, columns, tableName + ".tbl");
     }
     else if (command == "INSERT") {
@@ -22,7 +48,7 @@ bool Executor::Execute(const std::string& sql) {
         iss >> tmp >> tableName; // INTO tableName
         iss >> tmp;              // VALUES
         char ch;
-        iss >> ch; // skip '('
+        iss >> ch; // (
         std::vector<std::string> values;
         std::string val;
         while (iss >> val) {
@@ -30,11 +56,11 @@ bool Executor::Execute(const std::string& sql) {
                 if (val.back() == ',' || val.back() == ')')
                     val.pop_back();
                 values.push_back(val);
-                if (val.back() == ')') break;
             }
             else {
                 values.push_back(val);
             }
+            if (iss.peek() == ')') { iss >> ch; break; }
         }
         return ExecuteInsert(tableName, values);
     }
@@ -78,42 +104,7 @@ bool Executor::Execute(const std::string& sql) {
 }
 
 // ==========================
-// Wrappers
-// ==========================
-bool Executor::CreateTable(const std::string& tableName,
-    const std::vector<Column>& columns,
-    const std::string& fileName) {
-    return ExecuteCreateTable(tableName, columns, fileName);
-}
-
-bool Executor::Insert(const std::string& tableName,
-    const std::vector<std::string>& values) {
-    return ExecuteInsert(tableName, values);
-}
-
-bool Executor::Select(const std::string& tableName,
-    const std::vector<std::string>& columns,
-    const std::string& whereCol,
-    const std::string& whereVal) {
-    return ExecuteSelect(tableName, columns, whereCol, whereVal);
-}
-
-bool Executor::Delete(const std::string& tableName,
-    const std::string& whereCol,
-    const std::string& whereVal) {
-    return ExecuteDelete(tableName, whereCol, whereVal);
-}
-
-bool Executor::DropTable(const std::string& tableName) {
-    return ExecuteDropTable(tableName);
-}
-
-void Executor::ShowTables() {
-    ExecuteShowTables();
-}
-
-// ==========================
-// Thực thi CREATE TABLE
+// CREATE TABLE
 // ==========================
 bool Executor::ExecuteCreateTable(const std::string& tableName,
     const std::vector<Column>& columns,
@@ -127,48 +118,88 @@ bool Executor::ExecuteCreateTable(const std::string& tableName,
 }
 
 // ==========================
-// Thực thi INSERT
+// INSERT
 // ==========================
 bool Executor::ExecuteInsert(const std::string& tableName,
     const std::vector<std::string>& values) {
-    std::cout << "Inserting into " << tableName << " values: ";
+    TableInfo* table = catalog.GetTable(tableName);
+    if (!table) {
+        std::cerr << "Error: table " << tableName << " not found.\n";
+        return false;
+    }
+
+    // TODO: gọi RecordManager.Insert
+    std::cout << "[RecordManager] Insert into " << tableName << " values: ";
     for (auto& v : values) std::cout << v << " ";
     std::cout << "\n";
-    // TODO: gọi RecordManager.Insert
+
     return true;
 }
 
 // ==========================
-// Thực thi SELECT
+// SELECT
 // ==========================
 bool Executor::ExecuteSelect(const std::string& tableName,
     const std::vector<std::string>& columns,
     const std::string& whereCol,
     const std::string& whereVal) {
-    std::cout << "Selecting from " << tableName << "\n";
-    if (!whereCol.empty()) {
-        std::cout << "Where " << whereCol << " = " << whereVal << "\n";
+    TableInfo* table = catalog.GetTable(tableName);
+    if (!table) {
+        std::cerr << "Error: table " << tableName << " not found.\n";
+        return false;
     }
+
+    std::cout << "Executing SELECT on " << tableName << "\n";
+
+    // Toán tử 1: SeqScan
+    std::cout << "[SeqScan] Table: " << tableName << "\n";
+
+    // Toán tử 2: Filter
+    if (!whereCol.empty()) {
+        std::cout << "[Filter] Condition: " << whereCol << " = " << whereVal << "\n";
+    }
+
+    // Toán tử 3: Project
+    if (!columns.empty() && !(columns.size() == 1 && columns[0] == "*")) {
+        std::cout << "[Project] Columns: ";
+        for (auto& c : columns) std::cout << c << " ";
+        std::cout << "\n";
+    }
+    else {
+        std::cout << "[Project] All columns\n";
+    }
+
     // TODO: gọi RecordManager.Select
+    std::cout << "[RecordManager] Scan finished. (rows printed here)\n";
+
     return true;
 }
 
 // ==========================
-// Thực thi DELETE
+// DELETE
 // ==========================
 bool Executor::ExecuteDelete(const std::string& tableName,
     const std::string& whereCol,
     const std::string& whereVal) {
-    std::cout << "Deleting from " << tableName << "\n";
-    if (!whereCol.empty()) {
-        std::cout << "Where " << whereCol << " = " << whereVal << "\n";
+    TableInfo* table = catalog.GetTable(tableName);
+    if (!table) {
+        std::cerr << "Error: table " << tableName << " not found.\n";
+        return false;
     }
+
+    std::cout << "Executing DELETE on " << tableName << "\n";
+    if (!whereCol.empty()) {
+        std::cout << "[Filter] Condition: " << whereCol << " = " << whereVal << "\n";
+    }
+
     // TODO: gọi RecordManager.Delete
+    std::cout << "[RecordManager] Delete finished.\n";
+
     return true;
 }
 
 // ==========================
-// Thực thi DROP TABLE
+// DROP TABLE
 // ==========================
 bool Executor::ExecuteDropTable(const std::string& tableName) {
     if (catalogManager.DropTable(catalog, tableName)) {
@@ -179,7 +210,7 @@ bool Executor::ExecuteDropTable(const std::string& tableName) {
 }
 
 // ==========================
-// Thực thi SHOW TABLES
+// SHOW TABLES
 // ==========================
 void Executor::ExecuteShowTables() {
     std::cout << "Tables in catalog:\n";

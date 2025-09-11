@@ -4,7 +4,7 @@
 #include "catalog_manager.hpp"
 
 // ==========================
-// Executor thực thi các lệnh SQL đơn giản
+// Executor: Thực thi các lệnh SQL cơ bản
 // ==========================
 class Executor {
 public:
@@ -12,10 +12,10 @@ public:
         : catalogManager(manager), catalog(catalog) {
     }
 
-    // Thực thi một câu SQL dạng chuỗi
+    // Thực thi một câu SQL
     bool Execute(const std::string& sql);
 
-    // Public API (wrapper cho test)
+    // Public API cho test / gọi trực tiếp
     bool CreateTable(const std::string& tableName,
         const std::vector<Column>& columns,
         const std::string& fileName);
@@ -35,7 +35,7 @@ private:
     CatalogManager& catalogManager;
     Catalog& catalog;
 
-    // Các hàm thực thi riêng
+    // Các hàm thực thi nội bộ
     bool ExecuteCreateTable(const std::string& tableName,
         const std::vector<Column>& columns,
         const std::string& fileName);
