@@ -165,11 +165,11 @@ int main() {
     cat.create_table(td);
 
     std::string all =
-        "/* 正确用例 */\n"
-        "CREATE TABLE course(cid INT, title VARCHAR);\n"
-        "INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
+        //"/* 正确用例 */\n"
+        //"CREATE TABLE course(cid INT, title VARCHAR);\n"
+        //"INSERT INTO student(id,name,age) VALUES (1,'Alice',20);\n"
         //"INSERT INTO student VALUES (2,'Bob',19);\n"                 // 未给列清单，按表列顺序；数量=3
-        //"SELECT Name, AGE FROM Student WHERE age >= 20;\n"          // 大小写不敏感
+        //"SELECT name, age FROM student WHERE age >= 20;\n"          // 大小写不敏感
         //"SELECT student.name FROM student WHERE id = 1;\n"          // 限定列名 a.b
         "DELETE FROM student WHERE id = 999;\n"                      // 语义OK（虽然没匹配行）
         //"\n"

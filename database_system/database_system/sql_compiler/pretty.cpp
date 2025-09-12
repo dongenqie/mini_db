@@ -209,59 +209,158 @@ namespace minidb {
         return out;
     }
 
-    static const char* PlanName(PlanType t) {
-        switch (t) {
-        case PlanType::CREATE:  return "CreateTable";
-        case PlanType::INSERT:  return "Insert";
-        case PlanType::SEQSCAN: return "SeqScan";
-        case PlanType::FILTER:  return "Filter";
-        case PlanType::PROJECT: return "Project";
-        case PlanType::DELETE:  return "Delete";
-        default: return "Unknown";
+    static const char* OpName(PlanOp op) {
+        switch (op) {
+        case PlanOp::CREATE:  return "CreateTable";
+        case PlanOp::INSERT:  return "Insert";
+        case PlanOp::SEQSCAN: return "SeqScan";
+        case PlanOp::FILTER:  return "Filter";
+        case PlanOp::PROJECT: return "Project";
+        case PlanOp::DELETE_: return "Delete";
+        default:              return "Error";
         }
     }
 
-    std::string PlanJson(const PlanNode* n, int indent) {
-        std::ostringstream os;
-        os << Indent(indent) << "{ \"type\": \"" << PlanName(n->type) << "\"";
-        // fields
-        if (!n->table.empty()) os << ", \"table\": \"" << n->table << "\"";
-        if (!n->project_cols.empty()) {
-            os << ", \"project\": [";
-            for (size_t i = 0; i < n->project_cols.size(); ++i) {
-                os << "\"" << n->project_cols[i] << "\"";
-                if (i + 1 < n->project_cols.size()) os << ", ";
-            }
-            os << "]";
-        }
-        if (n->type == PlanType::CREATE) {
+    // —— JSON 渲染 —— //
+    static void to_json(const PlanNode* n, std::ostream& os, int ind) {
+        auto pad = [&](int k) { for (int i = 0; i < k; ++i) os << ' '; };
+        pad(ind); os << "{ \"type\": \"" << OpName(n->op) << "\"";
+
+        switch (n->op) {
+        case PlanOp::CREATE:
             os << ", \"create\": { \"name\": \"" << n->create_def.name << "\", \"cols\": [";
             for (size_t i = 0; i < n->create_def.columns.size(); ++i) {
                 auto& c = n->create_def.columns[i];
-                os << "{ \"name\": \"" << c.name << "\", \"type\": \""
-                    << (c.type == DataType::INT32 ? "INT" : "VARCHAR") << "\" }";
+                os << "{ \"name\": \"" << c.name << "\", \"type\": \"" << (c.type == DataType::INT32 ? "INT" : "VARCHAR") << "\" }";
                 if (i + 1 < n->create_def.columns.size()) os << ", ";
             }
             os << "] }";
+            break;
+
+        case PlanOp::INSERT:
+            os << ", \"table\": \"" << n->table << "\"";
+            os << ", \"columns\": [";
+            for (size_t i = 0; i < n->insert_cols.size(); ++i) {
+                os << '\"' << n->insert_cols[i] << '\"';
+                if (i + 1 < n->insert_cols.size()) os << ", ";
+            }
+            os << "]";
+            os << ", \"values\": [";
+            for (size_t i = 0; i < n->insert_values.size(); ++i) {
+                auto* e = n->insert_values[i].get();
+                if (auto ii = dynamic_cast<IntLit*>(e)) os << ii->v;
+                else if (auto ss = dynamic_cast<StrLit*>(e)) os << '\"' << ss->v << '\"';
+                else if (auto cc = dynamic_cast<ColRef*>(e)) os << '\"' << cc->name << '\"';
+                else os << "\"expr\"";
+                if (i + 1 < n->insert_values.size()) os << ", ";
+            }
+            os << "]";
+            break;
+
+        case PlanOp::SEQSCAN:
+            os << ", \"table\": \"" << n->table << "\"";
+            break;
+
+        case PlanOp::FILTER:
+            os << ", \"filter\": \"(predicate)\""; // 简化显示
+            break;
+
+        case PlanOp::PROJECT:
+            os << ", \"project\": [";
+            for (size_t i = 0; i < n->project.size(); ++i) {
+                os << '\"' << n->project[i] << '\"';
+                if (i + 1 < n->project.size()) os << ", ";
+            }
+            os << "]";
+            break;
+
+        case PlanOp::DELETE_:
+            os << ", \"table\": \"" << n->table << "\"";
+            if (n->predicate) os << ", \"filter\": \"(predicate)\"";
+            break;
+
+        case PlanOp::ERROR:
+            os << ", \"message\": \"" << n->error_msg << "\"";
+            break;
         }
-        if (n->filter) {
-            os << ", \"filter\": \"" << JsonEscape(ExprSexpr(n->filter.get())) << "\"";
-        }
-        // children
+
         if (!n->children.empty()) {
             os << ", \"children\": [\n";
             for (size_t i = 0; i < n->children.size(); ++i) {
-                os << PlanJson(n->children[i].get(), indent + 2);
+                to_json(n->children[i].get(), os, ind + 2);
                 if (i + 1 < n->children.size()) os << ",\n";
             }
-            os << "\n" << Indent(indent) << "]";
+            os << "\n"; pad(ind); os << "]";
         }
         os << " }";
-        return os.str();
     }
 
-    void PrintPlan(const Plan& p, std::ostream& os) {
-        os << "PLAN:\n" << PlanJson(p.root.get(), 2) << "\n";
+    // —— S-表达式渲染 —— //
+    static void to_sexpr(const PlanNode* n, std::ostream& os) {
+        os << "(" << OpName(n->op);
+        switch (n->op) {
+        case PlanOp::CREATE:
+            os << " \"" << n->create_def.name << "\" (";
+            for (size_t i = 0; i < n->create_def.columns.size(); ++i) {
+                auto& c = n->create_def.columns[i];
+                os << "(" << c.name << " " << (c.type == DataType::INT32 ? "INT" : "VARCHAR") << ")";
+                if (i + 1 < n->create_def.columns.size()) os << " ";
+            }
+            os << ")";
+            break;
+        case PlanOp::INSERT:
+            os << " \"" << n->table << "\" (";
+            for (size_t i = 0; i < n->insert_cols.size(); ++i) {
+                os << n->insert_cols[i];
+                if (i + 1 < n->insert_cols.size()) os << " ";
+            }
+            os << ") (";
+            for (size_t i = 0; i < n->insert_values.size(); ++i) {
+                auto* e = n->insert_values[i].get();
+                if (auto ii = dynamic_cast<IntLit*>(e)) os << ii->v;
+                else if (auto ss = dynamic_cast<StrLit*>(e)) os << "\"" << ss->v << "\"";
+                else if (auto cc = dynamic_cast<ColRef*>(e)) os << cc->name;
+                else os << "expr";
+                if (i + 1 < n->insert_values.size()) os << " ";
+            }
+            os << ")";
+            break;
+        case PlanOp::SEQSCAN:  os << " \"" << n->table << "\""; break;
+        case PlanOp::FILTER:   os << " (predicate)"; break;
+        case PlanOp::PROJECT:
+            os << " (";
+            for (size_t i = 0; i < n->project.size(); ++i) {
+                os << n->project[i];
+                if (i + 1 < n->project.size()) os << " ";
+            }
+            os << ")";
+            break;
+        case PlanOp::DELETE_:
+            os << " \"" << n->table << "\"";
+            if (n->predicate) os << " (predicate)";
+            break;
+        case PlanOp::ERROR:
+            os << " \"ERROR: " << n->error_msg << "\"";
+            break;
+        }
+        for (auto& ch : n->children) {
+            os << " ";
+            to_sexpr(ch.get(), os);
+        }
+        os << ")";
+    }
+
+    void PrintPlan(const Plan& p, std::ostream& os, const char* fmt) {
+        if (!p.root) { os << "(plan nil)\n"; return; }
+        if (std::string(fmt) == "sexpr") {
+            to_sexpr(p.root.get(), os);
+            os << "\n";
+        }
+        else {
+            // 默认 JSON
+            to_json(p.root.get(), os, 0);
+            os << "\n";
+        }
     }
 
 } // namespace minidb

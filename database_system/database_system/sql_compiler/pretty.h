@@ -29,6 +29,7 @@ namespace minidb {
 
 	// ---------- 执行计划打印（JSON 风格） ----------
 	std::string PlanJson(const PlanNode* n, int indent = 0);
-	void PrintPlan(const Plan& p, std::ostream& os);
+	// fmt: "json" 或 "sexpr"
+	void PrintPlan(const Plan& p, std::ostream& os, const char* fmt = "json");
 
 } // namespace minidb
