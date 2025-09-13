@@ -34,6 +34,6 @@ private:
     bool ExecuteDelete(const std::string& tableName,
         const std::string& whereCol,
         const std::string& whereVal);
-    bool ExecuteDropTable(const std::string& tableName);
+    bool ExecuteDropTable(const std::string& tableName, bool if_exists = false);
     void ExecuteShowTables();
 };

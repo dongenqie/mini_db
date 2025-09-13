@@ -18,7 +18,8 @@ namespace minidb {
         FILTER,     // 选择
         PROJECT,    // 投影
         DELETE_,    // 删除
-        ERROR       // 出错占位
+        ERROR,       // 出错占位
+        DROP,          // <== 新增
     };
 
     struct PlanNode {
@@ -44,6 +45,9 @@ namespace minidb {
         std::vector<std::string> insert_cols;                 // 为空表示按表列顺序
         std::vector<std::unique_ptr<Expr>> insert_values;     // 与 insert_cols 对齐（或与表列对齐）
 
+        // === 新增：承接 DROP TABLE IF EXISTS 的标志 ===
+        bool if_exists{ false };
+
         // ERROR
         std::string error_msg;
     };
@@ -62,6 +66,7 @@ namespace minidb {
         std::unique_ptr<PlanNode> plan_insert(const InsertStmt* s);
         std::unique_ptr<PlanNode> plan_select(const SelectStmt* s);
         std::unique_ptr<PlanNode> plan_delete(const DeleteStmt* s);
+        std::unique_ptr<PlanNode> plan_drop(const DropTableStmt* s);
 
         // 小工具
         static std::unique_ptr<PlanNode> make_error(std::string msg);

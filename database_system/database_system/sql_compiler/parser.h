@@ -54,6 +54,7 @@ namespace minidb {
         StmtPtr parse_delete(Status& st);
         // —— 新增 —— 
         StmtPtr parse_update(Status& st);
+        StmtPtr parse_drop(Status& st);
 
         // —— SELECT 扩展的子过程 —— 
         bool parse_qualified_name(std::string& out);

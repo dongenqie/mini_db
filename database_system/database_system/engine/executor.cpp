@@ -156,11 +156,50 @@ bool Executor::Execute(const std::string& sql) {
         return ExecuteDelete(tableName, whereCol, whereVal);
     }
     else if (command == "DROP") {
-        std::string tmp, tableName;
-        iss >> tmp >> tableName; // TABLE tableName(可能带分号)
+        auto up = [](std::string s) {
+            for (auto& ch : s) ch = static_cast<char>(std::toupper((unsigned char)ch));
+            return s;
+            };
+
+        std::string tok;
+
+        // 期望 TABLE（不区分大小写）
+        if (!(iss >> tok) || up(tok) != "TABLE") {
+            std::cerr << "DROP: expect TABLE\n";
+            return false;
+        }
+
+        bool if_exists = false;
+
+        // 兼容 "DROP TABLE IF EXISTS t1;" 与 "DROP TABLE t1;"
+        std::streampos pos_after_table = iss.tellg();
+        std::string maybeIf;
+        if (iss >> maybeIf) {
+            if (up(maybeIf) == "IF") {
+                std::string kwExists;
+                if (!(iss >> kwExists) || up(kwExists) != "EXISTS") {
+                    std::cerr << "DROP: expect EXISTS after IF\n";
+                    return false;
+                }
+                if_exists = true;
+            }
+            else {
+                // 不是 IF，回退让它作为表名读取
+                iss.clear();
+                iss.seekg(pos_after_table);
+            }
+        }
+
+        std::string tableName;
+        if (!(iss >> tableName)) {
+            std::cerr << "DROP: expect table name\n";
+            return false;
+        }
         tableName = trim_semicolon(tableName);
-        return ExecuteDropTable(tableName);
+
+        return ExecuteDropTable(tableName, if_exists);
     }
+
     else if (command == "SHOW") {
         ExecuteShowTables();
         return true;
@@ -292,16 +331,36 @@ bool Executor::ExecuteDelete(const std::string& tableName,
 // ==========================
 // DROP TABLE
 // ==========================
-bool Executor::ExecuteDropTable(const std::string& tableName) {
-    // 先删数据页链
+// executor.cpp —— ExecuteDropTable 改成带 if_exists
+bool Executor::ExecuteDropTable(const std::string& tableName, bool if_exists) {
+    // 目录查一下（如果你手头有 catalog）
+    TableInfo* t = catalog.GetTable(tableName);
+    if (!t) {
+        if (if_exists) {
+            std::cout << "Table '" << tableName << "' does not exist. Ignored.\n";
+            return true;
+        }
+        std::cerr << "Error: table " << tableName << " not found.\n";
+        return false;
+    }
+
+    // 1) 删除数据（当前最小实现为 no-op，已经在 storage_engine.cpp 添加了 DropTableData）
     storage.DropTableData(tableName);
-    // 再删目录项
+
+    // 2) 删除目录项
     if (catalogManager.DropTable(catalog, tableName)) {
         std::cout << "Table '" << tableName << "' dropped.\n";
         return true;
     }
+    // 兜底：如果失败
+    if (if_exists) {
+        std::cout << "Table '" << tableName << "' does not exist. Ignored.\n";
+        return true;
+    }
     return false;
 }
+
+
 
 
 // ==========================
@@ -427,6 +486,11 @@ bool Executor::ExecutePlan(const minidb::Plan& plan) {
         std::string whereCol, whereVal;
         if (root->predicate) extract_simple_eq(root->predicate.get(), whereCol, whereVal);
         return ExecuteDelete(root->table, whereCol, whereVal);
+    }
+    case PlanOp::DROP: {
+        // 使用编译器路径：执行 DROP
+        // root->table 是要删的表名；root->if_exists 标识 IF EXISTS
+        return ExecuteDropTable(root->table, root->if_exists);
     }
     default:
         std::cerr << "Unsupported plan root.\n";

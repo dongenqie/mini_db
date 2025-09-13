@@ -68,6 +68,12 @@ namespace minidb {
         std::unique_ptr<Expr> where;
     };
 
+    // ÐÂÔö£ºDROP Óï¾ä
+    struct DropTableStmt : Stmt {
+        std::string table;
+        bool if_exists{ false };
+    };
+
     using StmtPtr = std::unique_ptr<Stmt>;
     using ExprPtr = std::unique_ptr<Expr>;
 

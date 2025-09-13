@@ -383,6 +383,17 @@ namespace minidb {
         return Status::OK();
     }
 
+    // ！！ DROP ！！ //
+    Status SemanticAnalyzer::check_drop(const DropTableStmt* s, std::vector<Quad>& q) {
+        auto tdopt = cat_.get_table(to_lower(s->table));
+        if (!tdopt) {
+            if (s->if_exists) { q.push_back(Quad{ "DROP", s->table, "IF EXISTS", "-" }); return Status::OK(); }
+            return Status::Error("[SemanticError, table, Unknown table: " + s->table + "]");
+        }
+        q.push_back(Quad{ "DROP", s->table, "-", "-" });
+        return Status::OK();
+    }
+
     // ！！ 競蚊距業 ！！ //
     SemanticResult SemanticAnalyzer::analyze(Stmt* s) {
         std::vector<Quad> q;
@@ -391,6 +402,7 @@ namespace minidb {
         if (auto se = dynamic_cast<SelectStmt*>(s))      return { check_select(se,q), std::move(q) };
         if (auto d = dynamic_cast<DeleteStmt*>(s))      return { check_delete(d,q), std::move(q) };
         if (auto u = dynamic_cast<UpdateStmt*>(s))      return { check_update(u, q), std::move(q) };
+        if (auto dr = dynamic_cast<DropTableStmt*>(s)) return { check_drop(dr, q), std::move(q) };
         return { Status::Error("[SemanticError, stmt, Unknown statement]"), {} };
     }
 

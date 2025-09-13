@@ -124,6 +124,15 @@ namespace minidb {
         return n;
     }
 
+    // DROP
+    std::unique_ptr<PlanNode> Planner::plan_drop(const DropTableStmt* s) {
+        auto n = std::make_unique<PlanNode>();
+        n->op = PlanOp::DROP;
+        n->table = s->table;
+        n->if_exists = s->if_exists;
+        return n;
+    }
+
     // Èë¿Ú
     Plan Planner::plan_from_stmt(Stmt* s) {
         Plan p;
@@ -131,6 +140,7 @@ namespace minidb {
         if (auto i = dynamic_cast<InsertStmt*>(s)) { p.root = plan_insert(i); return p; }
         if (auto q = dynamic_cast<SelectStmt*>(s)) { p.root = plan_select(q); return p; }
         if (auto d = dynamic_cast<DeleteStmt*>(s)) { p.root = plan_delete(d); return p; }
+        if (auto dr = dynamic_cast<DropTableStmt*>(s)) { p.root = plan_drop(dr);  return p; }
         p.root = make_error("Unsupported statement type in planner");
         return p;
     }

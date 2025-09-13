@@ -295,6 +295,7 @@ namespace minidb {
         if (tk.lexeme == "SELECT") return parse_select(st);
         if (tk.lexeme == "DELETE") return parse_delete(st);
         if (tk.lexeme == "UPDATE") return parse_update(st);   // <== 新增
+        if (tk.lexeme == "DROP")   return parse_drop(st);
 
         st = Status::Error("Unknown statement at " + pos_str(tk) + " : " + tk.lexeme);
         sync_to_semi();
@@ -826,6 +827,37 @@ namespace minidb {
         u->where = std::move(where);
         return u;
     }
+
+    // =============== DROP ===============
+    StmtPtr Parser::parse_drop(Status& st) {
+        Token kwDrop = expect_kw("DROP", st, "DROP"); if (!st.ok) return nullptr;
+        trace_match_tok(kwDrop, "DROP");
+
+        Token kwTable = expect_kw("TABLE", st, "TABLE"); if (!st.ok) return nullptr;
+        trace_match_tok(kwTable, "TABLE");
+
+        bool if_exists = false;
+        if (accept_kw("IF")) {
+            Token fakeIf{ TokenType::KEYWORD, "IF", kwTable.line, kwTable.col };
+            trace_match_tok(fakeIf, "IF");
+            Token kwExists = expect_kw("EXISTS", st, "EXISTS"); if (!st.ok) return nullptr;
+            trace_match_tok(kwExists, "EXISTS");
+            if_exists = true;
+        }
+
+        Token tn = expect(TokenType::IDENT, st, "table name"); if (!st.ok) return nullptr;
+        trace_match_tok(tn, "ID(" + tn.lexeme + ")");
+
+        Token semi = expect(TokenType::SEMI, st, "';'"); if (!st.ok) return nullptr;
+        trace_match_tok(semi, "';'");
+        trace_accept();
+
+        auto d = std::make_unique<DropTableStmt>();
+        d->table = tn.lexeme;
+        d->if_exists = if_exists;
+        return d;
+    }
+
 
     // —— JOIN 列表： (INNER|LEFT|RIGHT|FULL)? JOIN ID ON Expr 反复 —— 
     bool Parser::parse_joins(Status& st, std::vector<SelectJoin>& joins) {

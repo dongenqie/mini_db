@@ -10,11 +10,13 @@ namespace minidb {
     static std::unordered_set<std::string> KW = {
         "SELECT","FROM","WHERE","CREATE","TABLE",
         "INSERT","INTO","VALUES","DELETE",
-        // 新增关键字（DML/查询扩展）
+        // DML/查询扩展
         "UPDATE","SET",
         "JOIN","INNER","LEFT","RIGHT","FULL","ON",
         "ORDER","BY","GROUP","HAVING","ASC","DESC",
         "LIMIT",
+        // 新增（本次修复的关键）
+        "DROP","IF","EXISTS",
         // 类型
         "INT","VARCHAR",
         // 逻辑

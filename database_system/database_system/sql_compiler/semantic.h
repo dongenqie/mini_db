@@ -23,7 +23,8 @@ namespace minidb {
         Status check_insert(const InsertStmt*, std::vector<Quad>& q);
         Status check_select(const SelectStmt*, std::vector<Quad>& q);
         Status check_delete(const DeleteStmt*, std::vector<Quad>& q);
-        Status check_update(const UpdateStmt*, std::vector<Quad>& q); // 如果你保留了四元式；没有就去掉 q 参数
+        Status check_update(const UpdateStmt*, std::vector<Quad>& q); 
+        Status check_drop(const DropTableStmt*, std::vector<Quad>& q);
 
         // 表达式类型推断 + 列存在检查（大小写不敏感，支持 a.b）
         std::optional<DataType> expr_type(const Expr*, const TableDef&, Status&);

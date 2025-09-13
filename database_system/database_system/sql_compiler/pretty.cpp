@@ -217,6 +217,7 @@ namespace minidb {
         case PlanOp::FILTER:  return "Filter";
         case PlanOp::PROJECT: return "Project";
         case PlanOp::DELETE_: return "Delete";
+        case PlanOp::DROP:    return "Drop";
         default:              return "Error";
         }
     }
@@ -278,9 +279,11 @@ namespace minidb {
             os << ", \"table\": \"" << n->table << "\"";
             if (n->predicate) os << ", \"filter\": \"(predicate)\"";
             break;
-
         case PlanOp::ERROR:
             os << ", \"message\": \"" << n->error_msg << "\"";
+            break;
+        case PlanOp::DROP:
+            os << ", \"table\": \"" << n->table << "\"";
             break;
         }
 
@@ -338,6 +341,9 @@ namespace minidb {
         case PlanOp::DELETE_:
             os << " \"" << n->table << "\"";
             if (n->predicate) os << " (predicate)";
+            break;
+        case PlanOp::DROP:
+            os << " \"" << n->table << "\"";
             break;
         case PlanOp::ERROR:
             os << " \"ERROR: " << n->error_msg << "\"";
