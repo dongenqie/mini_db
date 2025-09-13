@@ -35,5 +35,19 @@ private:
         const std::string& whereCol,
         const std::string& whereVal);
     bool ExecuteDropTable(const std::string& tableName, bool if_exists = false);
+    // DESC / DESCRIBE
+    bool ExecuteDesc(const std::string& tableName);
+    // SHOW CREATE TABLE
+    bool ExecuteShowCreate(const std::string& tableName);
+
+    // ALTER TABLE 分支
+    bool ExecuteAlterRename(const std::string& oldName, const std::string& newName);
+    bool ExecuteAlterAdd(const std::string& tableName, const Column& col, const std::string& after);
+    bool ExecuteAlterDrop(const std::string& tableName, const std::string& colName);
+    bool ExecuteAlterModify(const std::string& tableName, const std::string& colName,
+        ColumnType ty, int len);
+    bool ExecuteAlterChange(const std::string& tableName, const std::string& oldName,
+        const Column& newDef);
+
     void ExecuteShowTables();
 };

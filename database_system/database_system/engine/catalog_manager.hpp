@@ -27,6 +27,7 @@ public:
     Schema() = default;
     explicit Schema(const std::vector<Column>& cols) : columns(cols) {}
     const std::vector<Column>& GetColumns() const { return columns; }
+    std::vector<Column>& MutableColumns() { return columns; }
     int  GetColumnCount() const { return (int)columns.size(); }
 private:
     std::vector<Column> columns;
@@ -115,6 +116,35 @@ public:
     // === 新增：把内存中的 Catalog 持久化到 catalog.txt ===
     // 若你已有 SaveCatalog/Flush，请把名字改成你现有的函数名，并在 StorageEngine 调用它。
     bool PersistCatalog(const Catalog& cat, const std::string& path = "catalog.txt");
+
+    // --- NEW: 表重命名 ---
+    bool RenameTable(Catalog& catalog,
+        const std::string& oldName,
+        const std::string& newName);
+
+    // --- NEW: 增列（afterName为空则末尾添加）---
+    bool AlterAddColumn(Catalog& catalog,
+        const std::string& tableName,
+        const Column& newCol,
+        const std::string& afterName = "");
+
+    // --- NEW: 删列 ---
+    bool AlterDropColumn(Catalog& catalog,
+        const std::string& tableName,
+        const std::string& colName);
+
+    // --- NEW: 修改列类型/长度 ---
+    bool AlterModifyColumn(Catalog& catalog,
+        const std::string& tableName,
+        const std::string& colName,
+        ColumnType newType,
+        int newLen /*VARCHAR长度，其他类型填0*/);
+
+    // --- NEW: 改名+改类型（等价 MySQL CHANGE oldName newName type）---
+    bool AlterChangeColumn(Catalog& catalog,
+        const std::string& tableName,
+        const std::string& oldName,
+        const Column& newDef);
 
 private:
     std::string file_path;

@@ -199,11 +199,98 @@ bool Executor::Execute(const std::string& sql) {
 
         return ExecuteDropTable(tableName, if_exists);
     }
-
+    else if (command == "DESC" || command == "DESCRIBE") {
+        std::string tableName;
+        if (!(iss >> tableName)) { std::cerr << "DESC: expect table name\n"; return false; }
+        tableName = trim_semicolon(tableName);
+        return ExecuteDesc(tableName);
+}
     else if (command == "SHOW") {
-        ExecuteShowTables();
-        return true;
-    }
+        std::string kw1;
+        if (!(iss >> kw1)) { std::cerr << "SHOW: expect keyword\n"; return false; }
+        if (kw1 == "TABLES") {
+            ExecuteShowTables();
+            return true;
+        }
+        if (kw1 == "CREATE") {
+            std::string kw2, tname;
+            if (!(iss >> kw2) || kw2 != "TABLE") { std::cerr << "SHOW CREATE: expect TABLE\n"; return false; }
+            if (!(iss >> tname)) { std::cerr << "SHOW CREATE TABLE: expect table name\n"; return false; }
+            tname = trim_semicolon(tname);
+            return ExecuteShowCreate(tname);
+        }
+        std::cerr << "SHOW: unsupported form\n";
+        return false;
+}
+    else if (command == "ALTER") {
+        auto up = [](std::string s) { for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; };
+
+        std::string kwTable;
+        if (!(iss >> kwTable) || up(kwTable) != "TABLE") {
+            std::cerr << "ALTER: expect TABLE\n"; return false;
+        }
+        std::string tableName;
+        if (!(iss >> tableName)) { std::cerr << "ALTER TABLE: expect table name\n"; return false; }
+
+        std::string action;
+        if (!(iss >> action)) { std::cerr << "ALTER TABLE: expect action\n"; return false; }
+        action = up(action);
+
+        auto parse_type = [&](ColumnType& ty, int& len)->bool {
+            std::string t; if (!(iss >> t)) return false; t = up(t);
+            if (t == "INT") { ty = ColumnType::INT;   len = 0; return true; }
+            if (t == "FLOAT") { ty = ColumnType::FLOAT; len = 0; return true; }
+            if (t == "VARCHAR") {
+                if (iss.peek() == '(') { char ch; int L = 0; iss >> ch >> L >> ch; ty = ColumnType::VARCHAR; len = L; return true; }
+                int L = 0; if (iss >> L) { ty = ColumnType::VARCHAR; len = L; return true; }
+                ty = ColumnType::VARCHAR; len = 0; return true; // 未写长度也给过
+            }
+            return false;
+            };
+
+        if (action == "RENAME") {
+            std::string maybeTo, newName;
+            std::streampos pos = iss.tellg();
+            if (iss >> maybeTo) {
+                if (up(maybeTo) == "TO") {
+                    if (!(iss >> newName)) { std::cerr << "ALTER TABLE RENAME TO: expect new name\n"; return false; }
+                }
+                else { iss.clear(); iss.seekg(pos); iss >> newName; }
+            }
+            else { std::cerr << "ALTER TABLE RENAME: expect new name\n"; return false; }
+            newName = trim_semicolon(newName);
+            return ExecuteAlterRename(tableName, newName);
+        }
+        else if (action == "ADD") {
+            std::string colName; if (!(iss >> colName)) { std::cerr << "ALTER TABLE ADD: expect column name\n"; return false; }
+            ColumnType ty; int L = 0; if (!parse_type(ty, L)) { std::cerr << "ALTER TABLE ADD: bad type\n"; return false; }
+            // AFTER ?
+            std::string maybeAfter, afterCol; std::streampos p2 = iss.tellg();
+            if (iss >> maybeAfter) {
+                if (up(maybeAfter) == "AFTER") iss >> afterCol;
+                else { iss.clear(); iss.seekg(p2); }
+            }
+            return ExecuteAlterAdd(tableName, Column{ colName, ty, L, false, false }, afterCol);
+        }
+        else if (action == "DROP") {
+            std::string colName; if (!(iss >> colName)) { std::cerr << "ALTER TABLE DROP: expect column name\n"; return false; }
+            colName = trim_semicolon(colName);
+            return ExecuteAlterDrop(tableName, colName);
+        }
+        else if (action == "MODIFY") {
+            std::string colName; if (!(iss >> colName)) { std::cerr << "ALTER TABLE MODIFY: expect column name\n"; return false; }
+            ColumnType ty; int L = 0; if (!parse_type(ty, L)) { std::cerr << "ALTER TABLE MODIFY: bad type\n"; return false; }
+            return ExecuteAlterModify(tableName, colName, ty, L);
+        }
+        else if (action == "CHANGE") {
+            std::string oldName, newName;
+            if (!(iss >> oldName >> newName)) { std::cerr << "ALTER TABLE CHANGE: expect oldName newName\n"; return false; }
+            ColumnType ty; int L = 0; if (!parse_type(ty, L)) { std::cerr << "ALTER TABLE CHANGE: bad type\n"; return false; }
+            return ExecuteAlterChange(tableName, oldName, Column{ newName, ty, L, false, false });
+        }
+        std::cerr << "ALTER TABLE: unsupported action\n";
+        return false;
+        }
     else {
         std::cerr << "Unknown command: " << command << "\n";
         return false;
@@ -361,6 +448,90 @@ bool Executor::ExecuteDropTable(const std::string& tableName, bool if_exists) {
 }
 
 
+bool Executor::ExecuteDesc(const std::string& tableName) {
+    TableInfo* t = catalog.GetTable(tableName);
+    if (!t) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
+
+    std::cout << "+--------------+----------------+\n";
+    std::cout << "| Field        | Type           |\n";
+    std::cout << "+--------------+----------------+\n";
+    for (const auto& c : t->getSchema().GetColumns()) {
+        std::string ty = (c.type == ColumnType::INT ? "INT" :
+            (c.type == ColumnType::FLOAT ? "FLOAT" :
+                ("VARCHAR(" + std::to_string(c.length) + ")")));
+        std::cout << "| " << std::left << std::setw(12) << c.name
+            << " | " << std::left << std::setw(14) << ty << "|\n";
+    }
+    std::cout << "+--------------+----------------+\n";
+    return true;
+}
+
+bool Executor::ExecuteShowCreate(const std::string& tableName) {
+    TableInfo* t = catalog.GetTable(tableName);
+    if (!t) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
+
+    std::ostringstream ddl;
+    ddl << "CREATE TABLE " << t->name << " (";
+    const auto& cols = t->getSchema().GetColumns();
+    for (size_t i = 0; i < cols.size(); ++i) {
+        const auto& c = cols[i];
+        ddl << c.name << " "
+            << (c.type == ColumnType::INT ? "INT" :
+                c.type == ColumnType::FLOAT ? "FLOAT" :
+                ("VARCHAR(" + std::to_string(c.length) + ")"));
+        if (i + 1 < cols.size()) ddl << ", ";
+    }
+    ddl << ");";
+    std::cout << ddl.str() << "\n";
+    return true;
+}
+
+bool Executor::ExecuteAlterRename(const std::string& oldName, const std::string& newName) {
+    if (catalogManager.RenameTable(catalog, oldName, newName)) {
+        std::cout << "Table '" << oldName << "' renamed to '" << newName << "'.\n";
+        return true;
+    }
+    std::cerr << "ALTER TABLE RENAME failed.\n";
+    return false;
+}
+
+bool Executor::ExecuteAlterAdd(const std::string& tableName, const Column& col, const std::string& after) {
+    if (catalogManager.AlterAddColumn(catalog, tableName, col, after)) {
+        std::cout << "Column '" << col.name << "' added.\n";
+        return true;
+    }
+    std::cerr << "ALTER TABLE ADD failed.\n";
+    return false;
+}
+
+bool Executor::ExecuteAlterDrop(const std::string& tableName, const std::string& colName) {
+    if (catalogManager.AlterDropColumn(catalog, tableName, colName)) {
+        std::cout << "Column '" << colName << "' dropped.\n";
+        return true;
+    }
+    std::cerr << "ALTER TABLE DROP failed.\n";
+    return false;
+}
+
+bool Executor::ExecuteAlterModify(const std::string& tableName, const std::string& colName,
+    ColumnType ty, int len) {
+    if (catalogManager.AlterModifyColumn(catalog, tableName, colName, ty, len)) {
+        std::cout << "Column '" << colName << "' modified.\n";
+        return true;
+    }
+    std::cerr << "ALTER TABLE MODIFY failed.\n";
+    return false;
+}
+
+bool Executor::ExecuteAlterChange(const std::string& tableName, const std::string& oldName,
+    const Column& newDef) {
+    if (catalogManager.AlterChangeColumn(catalog, tableName, oldName, newDef)) {
+        std::cout << "Column '" << oldName << "' changed to '" << newDef.name << "'.\n";
+        return true;
+    }
+    std::cerr << "ALTER TABLE CHANGE failed.\n";
+    return false;
+}
 
 
 // ==========================

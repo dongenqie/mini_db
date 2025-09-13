@@ -1,9 +1,6 @@
 ﻿  main.cpp
+  catalog_manager.cpp
   executor.cpp
-  lexer.cpp
-  parser.cpp
-  planner.cpp
-  pretty.cpp
-  semantic.cpp
+  storage_engine.cpp
   正在生成代码...
   database_system.vcxproj -> D:\practical\database\database_system\x64\Debug\database_system.exe

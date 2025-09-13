@@ -264,3 +264,30 @@
 [2025-09-13 18:06:24] Flush page success: page 1 flushed to disk
 [2025-09-13 18:06:24] Flush page skipped: page 1 is not dirty
 [2025-09-13 18:06:30] Cache hit: page 1
+[2025-09-14 03:44:10] CacheManager initialized: capacity=64, policy=LRU
+[2025-09-14 03:44:52] Cache miss: page 1 read from disk
+[2025-09-14 03:44:52] Cache add: page 1 added to cache
+[2025-09-14 03:44:52] Flush page success: page 1 flushed to disk
+[2025-09-14 03:44:52] Cache hit: page 1
+[2025-09-14 03:44:52] Cache hit: page 1
+[2025-09-14 03:44:52] Flush page success: page 1 flushed to disk
+[2025-09-14 03:44:52] Flush page skipped: page 1 is not dirty
+[2025-09-14 03:44:52] Cache hit: page 1
+[2025-09-14 03:44:52] Cache hit: page 1
+[2025-09-14 03:44:52] Cache hit: page 1
+[2025-09-14 03:44:52] Flush page success: page 1 flushed to disk
+[2025-09-14 03:44:52] Flush page skipped: page 1 is not dirty
+[2025-09-14 03:44:52] Cache hit: page 1
+[2025-09-14 03:44:52] Cache hit: page 1
+[2025-09-14 03:44:52] Cache hit: page 1
+[2025-09-14 03:44:52] Flush page success: page 1 flushed to disk
+[2025-09-14 03:44:52] Flush page skipped: page 1 is not dirty
+[2025-09-14 03:44:58] Cache hit: page 1
+[2025-09-14 03:53:26] CacheManager initialized: capacity=64, policy=LRU
+[2025-09-14 03:53:43] Cache miss: page 1 read from disk
+[2025-09-14 03:53:43] Cache add: page 1 added to cache
+[2025-09-14 03:53:43] Flush page success: page 1 flushed to disk
+[2025-09-14 03:53:43] Cache hit: page 1
+[2025-09-14 03:53:43] Cache hit: page 1
+[2025-09-14 03:53:43] Flush page success: page 1 flushed to disk
+[2025-09-14 03:53:43] Flush page skipped: page 1 is not dirty

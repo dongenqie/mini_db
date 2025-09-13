@@ -159,3 +159,98 @@ bool CatalogManager::UpdateTablePages(Catalog& catalog,
     return SaveCatalog(catalog); // 简单点：每次更新都持久化一次
 }
 
+bool CatalogManager::RenameTable(Catalog& catalog,
+    const std::string& oldName,
+    const std::string& newName) {
+    if (oldName == newName) return true;
+    if (!catalog.GetTable(oldName)) return false;
+    if (catalog.GetTable(newName))  return false;
+
+    TableInfo* t = catalog.GetTable(oldName);
+    TableInfo tmp = *t;         // 拷贝
+    tmp.name = newName;
+    // 可选：文件名跟着改（保留后缀）
+    auto dot = tmp.file_name.rfind('.');
+    if (dot == std::string::npos) tmp.file_name = newName + ".tbl";
+    else                           tmp.file_name = newName + tmp.file_name.substr(dot);
+
+    catalog.RemoveTable(oldName);
+    catalog.AddTable(tmp.name, tmp.schema, tmp.file_name, tmp.first_pid, tmp.last_pid);
+    return SaveCatalog(catalog);
+}
+
+bool CatalogManager::AlterAddColumn(Catalog& catalog,
+    const std::string& tableName,
+    const Column& newCol,
+    const std::string& afterName) {
+    TableInfo* t = catalog.GetTable(tableName);
+    if (!t) return false;
+
+    auto& cols = t->schema.MutableColumns();
+    for (auto& c : cols) if (c.name == newCol.name) return false; // 重名
+
+    if (afterName.empty()) {
+        cols.push_back(newCol);
+    }
+    else {
+        auto it = std::find_if(cols.begin(), cols.end(),
+            [&](const Column& c) { return c.name == afterName; });
+        if (it == cols.end()) return false;
+        cols.insert(it + 1, newCol);
+    }
+    return SaveCatalog(catalog);
+}
+
+bool CatalogManager::AlterDropColumn(Catalog& catalog,
+    const std::string& tableName,
+    const std::string& colName) {
+    TableInfo* t = catalog.GetTable(tableName);
+    if (!t) return false;
+
+    auto& cols = t->schema.MutableColumns();
+    auto before = cols.size();
+    cols.erase(std::remove_if(cols.begin(), cols.end(),
+        [&](const Column& c) { return c.name == colName; }),
+        cols.end());
+    if (cols.size() == before) return false; // 未找到
+    return SaveCatalog(catalog);
+}
+
+bool CatalogManager::AlterModifyColumn(Catalog& catalog,
+    const std::string& tableName,
+    const std::string& colName,
+    ColumnType newType,
+    int newLen) {
+    TableInfo* t = catalog.GetTable(tableName);
+    if (!t) return false;
+
+    auto& cols = t->schema.MutableColumns();
+    for (auto& c : cols) {
+        if (c.name == colName) {
+            c.type = newType;
+            c.length = (newType == ColumnType::VARCHAR ? newLen : 0);
+            return SaveCatalog(catalog);
+        }
+    }
+    return false;
+}
+
+bool CatalogManager::AlterChangeColumn(Catalog& catalog,
+    const std::string& tableName,
+    const std::string& oldName,
+    const Column& newDef) {
+    TableInfo* t = catalog.GetTable(tableName);
+    if (!t) return false;
+
+    auto& cols = t->schema.MutableColumns();
+    // 新名重名检查（允许与 oldName 相同）
+    if (newDef.name != oldName) {
+        for (auto& c : cols) if (c.name == newDef.name) return false;
+    }
+    for (auto& c : cols) {
+        if (c.name == oldName) { c = newDef; return SaveCatalog(catalog); }
+    }
+    return false;
+}
+
+
