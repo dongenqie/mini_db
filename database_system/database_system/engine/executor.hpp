@@ -1,41 +1,27 @@
-﻿#pragma once
+﻿// =============================================
+// engine/executor.hpp  （覆盖/补丁）
+// =============================================
+#pragma once
 #include <string>
 #include <vector>
 #include "catalog_manager.hpp"
+#include "storage_engine.hpp"
+#include "../sql_compiler/planner.h"
+#include "../sql_compiler/ast.h"
 
-// ==========================
-// Executor: Thực thi các lệnh SQL cơ bản
-// ==========================
 class Executor {
 public:
-    explicit Executor(CatalogManager& manager, Catalog& catalog)
-        : catalogManager(manager), catalog(catalog) {
-    }
+    Executor(CatalogManager& manager, Catalog& catalog, StorageEngine& storage)
+        : catalogManager(manager), catalog(catalog), storage(storage) {}
 
-    // Thực thi một câu SQL
+    bool ExecutePlan(const minidb::Plan& plan);
     bool Execute(const std::string& sql);
-
-    // Public API cho test / gọi trực tiếp
-    bool CreateTable(const std::string& tableName,
-        const std::vector<Column>& columns,
-        const std::string& fileName);
-    bool Insert(const std::string& tableName,
-        const std::vector<std::string>& values);
-    bool Select(const std::string& tableName,
-        const std::vector<std::string>& columns,
-        const std::string& whereCol = "",
-        const std::string& whereVal = "");
-    bool Delete(const std::string& tableName,
-        const std::string& whereCol = "",
-        const std::string& whereVal = "");
-    bool DropTable(const std::string& tableName);
-    void ShowTables();
 
 private:
     CatalogManager& catalogManager;
     Catalog& catalog;
+    StorageEngine& storage;
 
-    // Các hàm thực thi nội bộ
     bool ExecuteCreateTable(const std::string& tableName,
         const std::vector<Column>& columns,
         const std::string& fileName);

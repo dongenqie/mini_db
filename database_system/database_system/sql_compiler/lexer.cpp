@@ -3,6 +3,7 @@
 // =============================================
 #include "lexer.h"
 #include <cassert>
+#pragma execution_character_set("utf-8")
 
 namespace minidb {
 

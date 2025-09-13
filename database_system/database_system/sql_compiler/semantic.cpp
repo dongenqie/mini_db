@@ -149,16 +149,29 @@ namespace minidb {
             }
         }
 
-        // 类型检查（要求解析阶段把值解析成 Expr，现已满足）
+        // 类型检查（INSERT 里允许未加引号的标识符作为 VARCHAR 字面量）
         for (size_t j = 0; j < s->values.size(); ++j) {
+            const auto target_ty = td.columns[pos[j]].type;
+
+            // 如果是裸标识符（ColRef），在 INSERT 语境下把它视作 VARCHAR 字面量
+            if (dynamic_cast<const ColRef*>(s->values[j].get())) {
+                if (target_ty != DataType::VARCHAR) {
+                    return Status::Error("[SemanticError, type, Type mismatch for column "
+                        + td.columns[pos[j]].name + "]");
+                }
+                continue; // 通过
+            }
+
+            // 其他情况仍按常规规则检查（IntLit/StrLit/比较出错等）
             Status tmp = Status::OK();
             auto t = expr_type(s->values[j].get(), td, tmp);
             if (!tmp.ok) return tmp;
-            if (!t || *t != td.columns[pos[j]].type) {
+            if (!t || *t != target_ty) {
                 return Status::Error("[SemanticError, type, Type mismatch for column "
                     + td.columns[pos[j]].name + "]");
             }
         }
+
 
         // 过程：对每个值先生成 CONST，拿到 T?；再按列生成 INSERT col, <literal>, T?
         auto next_tmp = [&]() {

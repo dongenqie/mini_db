@@ -1,3 +1,6 @@
+// =============================================
+// storage/page_manager.hpp
+// =============================================
 #ifndef PAGE_MANAGER_H
 #define PAGE_MANAGER_H
 
@@ -15,9 +18,10 @@ private:
     uint32_t next_page_id;       // 下一个待分配的新页号（初始为1，确保页号唯一）
     list<uint32_t> free_page_list; // 空闲页列表（维护可复用的页号，避免磁盘碎片）
 
-    // 辅助函数：计算页在数据文件中的物理偏移（页号 × 页大小）
+    // 关键修正：页偏移必须是 (page_id - 1) * PAGE_SIZE
     uint64_t get_page_offset(uint32_t page_id) const {
-        return static_cast<uint64_t>(page_id) * PAGE_SIZE;
+        // 页号从 1 开始
+        return static_cast<uint64_t>(page_id - 1) * PAGE_SIZE;
     }
 
     // 辅助函数：初始化数据文件（若不存在则创建空文件，确保后续读写正常）

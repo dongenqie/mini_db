@@ -19,6 +19,13 @@ namespace minidb {
         if (trace_on_) trace_.push_back(s);
     }
 
+    void Parser::clear_trace() {
+        trace_.clear();
+        stack_.clear();
+        step_ = 0;
+        printed_header_ = false;
+    }
+
     bool Parser::parse_qualified_name(std::string& out) {
         Status dummy = Status::OK();
         Token first = cur();
@@ -337,13 +344,53 @@ namespace minidb {
             Token cn = expect(TokenType::IDENT, st, "column name"); if (!st.ok) return nullptr;
             trace_match_tok(cn, "ID(" + cn.lexeme + ")");
 
-            Token ty = expect(TokenType::KEYWORD, st, "type(INT/VARCHAR)"); if (!st.ok) return nullptr;
+            Token ty = expect(TokenType::KEYWORD, st, "type(INT/VARCHAR)");
+            if (!st.ok) return nullptr;
             trace_match_tok(ty, ty.lexeme);
 
             DataType dt;
-            if (ty.lexeme == "INT") dt = DataType::INT32;
-            else if (ty.lexeme == "VARCHAR") dt = DataType::VARCHAR;
-            else { st = Status::Error("Unsupported type: " + ty.lexeme); return nullptr; }
+            if (ty.lexeme == "INT") {
+                dt = DataType::INT32;
+            }
+            else if (ty.lexeme == "VARCHAR") {
+                dt = DataType::VARCHAR;
+
+                // 兼容两种长度写法：VARCHAR(64) 或 VARCHAR 64
+                if (is(TokenType::LPAREN)) {
+                    // VARCHAR(64)
+                    Token lp = expect(TokenType::LPAREN, st, "'('");
+                    if (!st.ok) return nullptr;
+                    trace_match_tok(lp, "'('");
+
+                    Token len = expect(TokenType::INTCONST, st, "varchar length");
+                    if (!st.ok) return nullptr;
+                    // 跟踪时把长度当作一个普通数字展示
+                    trace_match_tok(len, len.lexeme);
+
+                    Token rp = expect(TokenType::RPAREN, st, "')'");
+                    if (!st.ok) return nullptr;
+                    trace_match_tok(rp, "')'");
+                    // 当前实现不使用长度值，可忽略 len.lexeme
+                }
+                else if (is(TokenType::INTCONST)) {
+                    // VARCHAR 64
+                    Token len = expect(TokenType::INTCONST, st, "varchar length");
+                    if (!st.ok) return nullptr;
+                    trace_match_tok(len, len.lexeme);
+                    // 同样忽略具体长度
+                }
+                else {
+                    // 不强制要求写长度（如仅写 VARCHAR），也可在此放宽
+                    // 若要强制，请改为 expect_or_sync 报错：
+                    // expect_or_sync(st, "varchar length like '(N)' or ' N'");
+                    // return nullptr;
+                }
+            }
+            else {
+                st = Status::Error("Unsupported type: " + ty.lexeme);
+                return nullptr;
+            }
+
             td.columns.push_back({ cn.lexeme, dt });
 
             // ',' ColDef 继续

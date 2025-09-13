@@ -136,6 +136,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="engine\catalog_manager.hpp" />
+    <ClInclude Include="engine\executor.hpp" />
+    <ClInclude Include="engine\storage_engine.hpp" />
     <ClInclude Include="sql_compiler\ast.h" />
     <ClInclude Include="sql_compiler\catalog_adapter_engine.h" />
     <ClInclude Include="sql_compiler\catalog_iface.h" />
@@ -145,26 +148,32 @@
     <ClInclude Include="sql_compiler\planner.h" />
     <ClInclude Include="sql_compiler\pretty.h" />
     <ClInclude Include="sql_compiler\semantic.h" />
+    <ClInclude Include="storage\cache_manager.hpp" />
+    <ClInclude Include="storage\file_manager.hpp" />
+    <ClInclude Include="storage\page.hpp" />
+    <ClInclude Include="storage\page_manager.hpp" />
     <ClInclude Include="utils\common.h" />
     <ClInclude Include="utils\constants.h" />
     <ClInclude Include="utils\helpers.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="cli\main.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="engine\catalog_manager.cpp" />
+    <ClCompile Include="engine\executor.cpp" />
+    <ClCompile Include="engine\storage_engine.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="sql_compiler\lexer.cpp" />
     <ClCompile Include="sql_compiler\parser.cpp" />
     <ClCompile Include="sql_compiler\planner.cpp" />
     <ClCompile Include="sql_compiler\pretty.cpp" />
     <ClCompile Include="sql_compiler\semantic.cpp" />
-    <ClCompile Include="tests\test_db.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="tests\test_sql.cpp" />
-    <ClCompile Include="tests\test_storage.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClCompile>
+    <ClCompile Include="storage\cache_manager.cpp" />
+    <ClCompile Include="storage\file_manager.cpp" />
+    <ClCompile Include="storage\page.cpp" />
+    <ClCompile Include="storage\page_manager.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

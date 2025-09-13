@@ -1,3 +1,6 @@
+// =============================================
+// storage/page_manager.cpp
+// =============================================
 #include "page_manager.hpp"
 #include <algorithm>
 #include <iostream>
@@ -13,32 +16,33 @@ PageManager::PageManager(const string& data_path)
 uint32_t PageManager::allocate_page() {
     uint32_t page_id;
     if (!free_page_list.empty()) {
-        // 复用空闲页：取列表头部页号（FIFO复用策略）
         page_id = free_page_list.front();
         free_page_list.pop_front();
     }
     else {
-        // 无空闲页：分配新页号（递增确保唯一）
         page_id = next_page_id++;
-        // 扩展数据文件：新增一页大小的空间（避免后续写页时偏移超出文件大小）
-        ofstream data_file(data_file_path, ios::app | ios::binary);
-        if (!data_file) {
-            throw runtime_error("page_manager.cpp——扩展数据文件失败");
+        // 预扩展文件：在正确偏移写一页零
+        std::fstream fs(data_file_path, std::ios::in | std::ios::out | std::ios::binary);
+        if (!fs) {
+            // 文件可能还没创建为可读写，用 ofstream 先创建再打开
+            std::ofstream create(data_file_path, std::ios::binary | std::ios::app);
+            create.close();
+            fs.open(data_file_path, std::ios::in | std::ios::out | std::ios::binary);
         }
-        char empty_page[PAGE_SIZE] = { 0 }; // 空页初始化（全0）
-        data_file.write(empty_page, PAGE_SIZE);
-        data_file.close();
+        fs.seekp(get_page_offset(page_id), std::ios::beg);
+        char zero[PAGE_SIZE] = { 0 };
+        fs.write(zero, PAGE_SIZE);
+        fs.close();
     }
 
-    // 初始化新页（设置页号并写入磁盘）
     Page new_page(page_id);
     new_page.serialize();
     if (!write_page(page_id, new_page)) {
-        throw runtime_error("page_manager.cpp——页分配失败: 设置页号写入磁盘失败");
+        throw std::runtime_error("allocate_page(): write_page failed");
     }
-
     return page_id;
 }
+
 
 // 页释放：将页号加入空闲列表（逻辑释放）
 bool PageManager::free_page(uint32_t page_id) {
@@ -65,45 +69,45 @@ bool PageManager::free_page(uint32_t page_id) {
 
 // 页读取：从磁盘读取指定页号的内容到Page对象
 bool PageManager::read_page(uint32_t page_id, Page& page) {
-    // 合法性检查：页号无效或偏移超出文件大小
     if (page_id == INVALID_PAGE_ID) {
         return false;
     }
     uint64_t offset = get_page_offset(page_id);
 
-    // 打开数据文件并定位到页偏移
-    ifstream data_file(data_file_path, ios::in | ios::binary);
+    std::ifstream data_file(data_file_path, std::ios::in | std::ios::binary);
     if (!data_file) {
         return false;
     }
-    // 检查偏移是否超出文件总大小（避免读取无效数据）
-    data_file.seekg(0, ios::end);
-    uint64_t file_size = data_file.tellg();
-    if (offset >= file_size) {
+
+    // 检查偏移是否越界
+    data_file.seekg(0, std::ios::end);
+    std::streamoff file_size = data_file.tellg();
+    if (file_size < 0 || offset + PAGE_SIZE > static_cast<uint64_t>(file_size)) {
         data_file.close();
         return false;
     }
 
-    // 读取一页数据并反序列化
-    data_file.seekg(offset, ios::beg);
+    // 读取一页
+    data_file.seekg(offset, std::ios::beg);
     char disk_page[PAGE_SIZE];
     data_file.read(disk_page, PAGE_SIZE);
-    data_file.close();
 
-    // 检查是否成功读取一整页
+    // 在关闭前检查读取字节数
     if (data_file.gcount() != PAGE_SIZE) {
+        data_file.close();
         return false;
     }
+    data_file.close();
 
     try {
         page.deserialize(disk_page);
     }
-    catch (const exception&) {
+    catch (...) {
         return false;
     }
-
     return true;
 }
+
 
 // 页写入：将Page对象的数据写入磁盘对应页位置
 bool PageManager::write_page(uint32_t page_id, const Page& page) {

@@ -2,6 +2,11 @@
 // sql_compiler/parser.h
 // 递归下降语法分析器（改进版）：更好的错误提示 + 同步恢复 + 过程跟踪
 // =============================================
+// sql_compiler/parser.h  顶部加入（或确保存在且在最前面）
+#ifndef MINIDB_PARSER_DEBUG
+#define MINIDB_PARSER_DEBUG 0
+#endif
+
 #pragma once
 #include "lexer.h"
 #include "ast.h"
@@ -13,7 +18,9 @@ namespace minidb {
 
     class Parser {
     public:
-        explicit Parser(Lexer& lx) : lx_(lx) {}
+        // 新：默认根据宏决定是否开 trace（默认 0 -> 关闭）
+        explicit Parser(Lexer& lx, bool enable_trace = (MINIDB_PARSER_DEBUG != 0))
+            : lx_(lx), trace_on_(enable_trace) {}
 
         StmtPtr parse_statement(Status& st);
 
@@ -21,7 +28,6 @@ namespace minidb {
         void enable_trace(bool on) { trace_on_ = on; }
 
         const std::vector<std::string>& trace_log() const { return trace_; }
-        void clear_trace() { trace_.clear(); }
 
     private:
         // 词法前瞻/匹配
@@ -68,15 +74,19 @@ namespace minidb {
         // 可选：保留文字日志缓存（当前不直接打印）
         void trace(const std::string& s);
 
+        void clear_trace();
+
     private:
         Lexer& lx_;
-        Token t_{}; bool has_{ false };
+        Token t_{}; 
+        bool has_{ false };
 
-        bool trace_on_{ true };
+        bool trace_on_{ false };
         int step_{ 0 };
-        std::vector<std::string> stack_;
         bool printed_header_{ false };
+        std::vector<std::string> stack_;
         std::vector<std::string> trace_;   // <== 之前缺这个导致编译错误
+
     };
 
 } // namespace minidb

@@ -1,0 +1,1 @@
+t1|t1.tbl|1|1|2|id:INT|name:VARCHAR(64)

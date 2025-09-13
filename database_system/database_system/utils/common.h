@@ -18,7 +18,7 @@
 
 namespace minidb {
 
-	static constexpr size_t PAGE_SIZE = 4096;
+	//static constexpr size_t PAGE_SIZE = 4096;
 
 	enum class DataType { INT32, VARCHAR };
 

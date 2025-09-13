@@ -1,3 +1,6 @@
+// =============================================
+// storage/cache_manager.cpp
+// =============================================
 //实现CacheManager类的所有成员函数（缓存操作、替换逻辑、日志输出）
 #include "cache_manager.hpp"
 #include <algorithm>

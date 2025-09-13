@@ -1,4 +1,6 @@
-//定义CacheManager类（缓存结构、LRU/FIFO 策略、命中统计、核心接口）
+// =============================================
+// storage/cache_manager.hpp
+// =============================================//定义CacheManager类（缓存结构、LRU/FIFO 策略、命中统计、核心接口）
 #ifndef CACHE_MANAGER_H
 #define CACHE_MANAGER_H
 
@@ -32,13 +34,13 @@ struct CacheNode {
 class CacheManager {
 private:
     PageManager& page_manager;          // 关联的页管理器（用于缓存未命中时读磁盘、脏页刷盘）
-    unordered_map<uint32_t, CacheNode> cache_map; // 缓存哈希表（键：页号，值：缓存节点）
+    std::unordered_map<uint32_t, CacheNode> cache_map;// 缓存哈希表（键：页号，值：缓存节点）
     uint32_t cache_capacity;            // 缓存最大容量（页数量，指导书未指定，用户可配置）
     ReplacePolicy policy;               // 缓存替换策略（LRU/FIFO）
     // 统计信息（指导书要求的缓存命中统计）
     uint32_t hit_count;                 // 命中次数
     uint32_t miss_count;                // 未命中次数
-    string log_file_path;               // 日志文件路径（指导书要求的替换日志输出）
+    std::string log_file_path;            // 日志文件路径（指导书要求的替换日志输出）
 
     // -------------------------- 替换策略核心函数（私有，内部调用） --------------------------
     // LRU策略：移除“最后访问时间最早”的缓存页
@@ -74,13 +76,13 @@ public:
 
     // -------------------------- 辅助接口（供测试/调试用） --------------------------
     // 获取缓存当前大小
-    uint32_t get_current_size() const { return cache_map.size(); }
+    uint32_t get_current_size() const { return static_cast<uint32_t>(cache_map.size()); }
     // 获取缓存容量
     uint32_t get_capacity() const { return cache_capacity; }
 
 
     // 测试辅助接口：获取缓存哈希表（仅测试用）
-    unordered_map<uint32_t, CacheNode>& get_cache_map() { return cache_map; }
+    std::unordered_map<uint32_t, CacheNode>& get_cache_map() { return cache_map; }
 
     // 标记缓存页为脏页（供FileManager的write_page调用）
     void mark_dirty(uint32_t page_id) {

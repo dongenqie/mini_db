@@ -1,3 +1,6 @@
+// =============================================
+// storage/file_manager.hpp
+// =============================================
 //定义FileManager类（文件初始化、元数据读写、统一存储接口、模块协同）
 #ifndef FILE_MANAGER_H
 #define FILE_MANAGER_H

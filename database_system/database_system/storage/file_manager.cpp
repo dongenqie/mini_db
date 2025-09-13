@@ -1,3 +1,6 @@
+// =============================================
+// storage/file_manager.cpp
+// =============================================
 //实现FileManager类的所有成员函数（文件创建、元数据持久化、接口封装）
 #include "file_manager.hpp"
 #include <fstream>
@@ -135,9 +138,19 @@ FileManager::~FileManager() {
 
 // -------------------------- 指导书统一接口：分配页 --------------------------
 uint32_t FileManager::allocate_page() {
-    // 调用PageManager分配页，返回页号
     uint32_t page_id = page_manager.allocate_page();
-    // 分配后需更新元数据（后续析构时会保存，此处可省略实时保存以提升效率）
+
+    // 把新页拉入缓存并初始化页头，然后写盘
+    Page* cache_page = cache_manager.get_page(page_id);
+    if (cache_page) {
+        cache_page->set_page_id(page_id);
+        cache_page->set_free_offset(PAGE_HEADER_SIZE);
+        cache_page->set_prev_page_id(INVALID_PAGE_ID);
+        cache_page->set_next_page_id(INVALID_PAGE_ID);
+        cache_page->serialize();
+        cache_manager.mark_dirty(page_id);
+        cache_manager.flush_page(page_id);
+    }
     return page_id;
 }
 
@@ -157,29 +170,23 @@ Page* FileManager::read_page(uint32_t page_id) {
 
 // -------------------------- 指导书统一接口：写页 --------------------------
 bool FileManager::write_page(uint32_t page_id, const Page& page) {
-    // 1. 检查页号合法性（页号需与Page对象的页号一致）
-    if (page.get_page_id() != page_id) {
+    if (page_id == INVALID_PAGE_ID || page.get_page_id() != page_id) {
         return false;
     }
 
-    // 2. 从缓存获取页（若不存在则加入缓存）
+    // 1) 确保缓存里有这页
     Page* cache_page = cache_manager.get_page(page_id);
-    if (cache_page == nullptr) {
-        return false;
-    }
+    if (cache_page == nullptr) return false;
 
-    // 3. 复制页数据到缓存（通过write_data接口，确保数据区正确写入）
-    // 先清空缓存页数据（避免残留脏数据）
-    char empty_data[PAGE_SIZE] = { 0 };
-    cache_page->write_data(0, empty_data, PAGE_SIZE);
-    // 写入新页数据（从page的data区复制完整内容）
-    cache_page->write_data(0, page.data, PAGE_SIZE);
+    // 2) 用“赋值”把调用者的 Page（含元信息字段和 data 缓冲）拷到缓存页对象
+    *cache_page = page;
 
-    // 4. 标记缓存页为脏页（延迟刷盘，提升I/O效率）
-    // 注：需在CacheManager中新增mark_dirty接口（私有成员is_dirty的设置）
+    // 3) 关键：把当前元信息(page_id/free_offset/prev/next)覆写到 data[0..15]
+    cache_page->serialize();
+
+    // 4) 标脏并立即刷盘（交互式场景下可见性立刻生效）
     cache_manager.mark_dirty(page_id);
-
-    return true;
+    return cache_manager.flush_page(page_id);
 }
 
 // -------------------------- 指导书统一接口：刷新指定页 --------------------------
