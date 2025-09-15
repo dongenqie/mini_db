@@ -1,2 +1,2 @@
-test1|test1.tbl|3|3|2|id:INT|name:VARCHAR(64)
+test1|test1.tbl|2|2|2|id:INT|name:VARCHAR(64)
 user|user.tbl|1|1|7|id:INT|name:VARCHAR(50)|user_email:VARCHAR(50)|age:VARCHAR(0)|fee:VARCHAR(0)|createTime:VARCHAR(0)|password:VARCHAR(0)

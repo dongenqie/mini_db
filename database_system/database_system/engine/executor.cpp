@@ -282,6 +282,45 @@ static std::string col_type_to_mysql(const EngColumn& c) {
         return base;
 }
 
+// ------- pretty print table -------
+// headers.size() == 每行的列数；rows 里每行 cells.size() 也要相同
+static void print_boxed_table(const std::vector<std::string>& headers,
+    const std::vector<std::vector<std::string>>& rows) {
+    using std::string; using std::vector;
+
+    const size_t n = headers.size();
+    std::vector<size_t> w(n, 0);
+    for (size_t i = 0; i < n; ++i) w[i] = headers[i].size();
+    for (const auto& r : rows) {
+        for (size_t i = 0; i < n && i < r.size(); ++i)
+            w[i] = std::max(w[i], r[i].size());
+    }
+
+    auto line = [&]() {
+        std::cout << '+';
+        for (size_t i = 0; i < n; ++i) {
+            std::cout << std::string(w[i] + 2, '-')
+                << (i + 1 == n ? "+\n" : "+");
+        }
+        };
+    auto row = [&](const std::vector<std::string>& r) {
+        std::cout << '|';
+        for (size_t i = 0; i < n; ++i) {
+            std::cout << ' ' << std::left << std::setw((int)w[i])
+                << (i < r.size() ? r[i] : "")
+                << ' ' << '|';
+        }
+        std::cout << "\n";
+        };
+
+    line();
+    row(headers);
+    line();
+    for (const auto& r : rows) row(r);
+    line();
+}
+
+
 // ==========================
 // Parse & Dispatch SQL
 // ==========================
@@ -708,12 +747,14 @@ bool Executor::ExecuteSelect(const std::string& tableName,
     const std::vector<std::string>& columns,
     const std::string& whereCol,
     const std::string& whereVal) {
+
     TableInfo* table = catalog.GetTable(tableName);
     if (!table) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
 
-    auto rows = storage.SelectAll(tableName);
+    // 拉所有数据（你的存储层返回字符串向量）
+    auto rows_raw = storage.SelectAll(tableName);
 
-    // where 过滤 + 投影（与原 CSV 版本一致）
+    // where 过滤
     int whereIdx = -1;
     if (!whereCol.empty()) {
         const auto& cols = table->getSchema().GetColumns();
@@ -722,43 +763,53 @@ bool Executor::ExecuteSelect(const std::string& tableName,
         if (whereIdx == -1) { std::cerr << "Error: WHERE column not found.\n"; return false; }
     }
 
+    // 决定投影列索引 & 表头
     std::vector<int> projIdx;
+    std::vector<std::string> headers;
+    const auto& schemaCols = table->getSchema().GetColumns();
     bool star = (columns.size() == 1 && columns[0] == "*");
-    if (!star) {
-        const auto& cols = table->getSchema().GetColumns();
-        for (auto& c : columns) {
+    if (star) {
+        for (int i = 0; i < (int)schemaCols.size(); ++i) {
+            projIdx.push_back(i);
+            headers.push_back(schemaCols[i].name);
+        }
+    }
+    else {
+        for (const auto& c : columns) {
             int idx = -1;
-            for (int i = 0; i < (int)cols.size(); ++i)
-                if (cols[i].name == c) { idx = i; break; }
+            for (int i = 0; i < (int)schemaCols.size(); ++i)
+                if (schemaCols[i].name == c) { idx = i; break; }
             if (idx == -1) { std::cerr << "Error: column " << c << " not found.\n"; return false; }
             projIdx.push_back(idx);
+            headers.push_back(c);
         }
     }
 
-    for (auto& fields : rows) {
+    // 生成展示行（先 where，再投影）
+    std::vector<std::vector<std::string>> outRows;
+    for (const auto& fields : rows_raw) {
         if (whereIdx >= 0) {
             if (whereIdx >= (int)fields.size()) continue;
             if (fields[whereIdx] != whereVal) continue;
         }
+        std::vector<std::string> out;
+        out.reserve(projIdx.size());
+        for (int idx : projIdx) {
+            out.push_back(idx < (int)fields.size() ? fields[idx] : "");
+        }
+        outRows.push_back(std::move(out));
+    }
 
-        if (star) {
-            for (size_t i = 0; i < fields.size(); ++i) {
-                if (i) std::cout << " | ";
-                std::cout << fields[i];
-            }
-            std::cout << "\n";
-        }
-        else {
-            for (size_t k = 0; k < projIdx.size(); ++k) {
-                if (k) std::cout << " | ";
-                int idx = projIdx[k];
-                std::cout << (idx < (int)fields.size() ? fields[idx] : "");
-            }
-            std::cout << "\n";
-        }
+    // 表格打印
+    if (headers.empty()) {          // 没有列就直接空
+        std::cout << "(empty)\n";
+    }
+    else {
+        print_boxed_table(headers, outRows);
     }
     return true;
 }
+
 
 
 // ==========================
@@ -952,10 +1003,13 @@ bool Executor::ExecuteAlterChange(const std::string& tableName, const std::strin
 // SHOW TABLES
 // ==========================
 void Executor::ExecuteShowTables() {
-    std::cout << "Tables in catalog:\n";
+    // 取所有表名
+    std::vector<std::vector<std::string>> rows;
     for (const auto& tableName : catalog.ListTables()) {
-        std::cout << " - " << tableName << "\n";
+        rows.push_back({ tableName });
     }
+    // 表头：保持简单叫 "Tables"
+    print_boxed_table({ "Tables_in_" + current_db }, rows);
 }
 
 // engine/executor.cpp（合适位置，和其他 ExecuteXxx 同级）
