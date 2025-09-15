@@ -15,15 +15,34 @@
 #include <filesystem>
 #include <list>
 #include <cctype>
+#include <optional>
+#include <algorithm>
 
 namespace minidb {
 
 	//static constexpr size_t PAGE_SIZE = 4096;
 
-	enum class DataType { INT32, VARCHAR };
+    enum class DataType {
+        INT32,
+        TINYINT,
+        FLOAT,
+        CHAR,
+        VARCHAR,
+        DECIMAL,
+        TIMESTAMP
+    };
 
-	struct Column { std::string name; DataType type; };
-	struct TableDef { std::string name; std::vector<Column> columns; };
+    struct ColumnDef {
+        std::string name;
+        DataType    type{ DataType::VARCHAR };
+        int         length{ 0 };   // CHAR/VARCHAR 的长度或 INT/TINYINT 的显示宽度
+        int         scale{ 0 };    // DECIMAL 的 scale；precision 用 length 存
+    };
+
+    struct TableDef {
+        std::string name;
+        std::vector<ColumnDef> columns;
+    };
 	using Value = std::variant<int32_t, std::string>;
 	struct Row { std::vector<Value> values; };
 
@@ -42,9 +61,9 @@ namespace minidb {
     }
 
     // ===== 新增：大小写不敏感/限定名工具（仅新增，不改旧接口） =====
-    inline std::string to_lower(std::string s) {
-        for (char& c : s) c = (char)std::tolower((unsigned char)c);
-        return s;
+    // 小工具：转小写
+    inline std::string to_lower(const std::string& s) {
+        std::string o = s; for (auto& c : o) c = (char)std::tolower((unsigned char)c); return o;
     }
     inline std::string to_upper(std::string s) {
         for (char& c : s) c = (char)std::toupper((unsigned char)c);
@@ -64,12 +83,14 @@ namespace minidb {
         return { n.substr(0,p), n.substr(p + 1) };
     }
 
-    // 便捷：在一张表里按列名（大小写不敏感）找第一个匹配的列下标
-    inline std::optional<size_t> find_col_ci(const TableDef& td, const std::string& name_or_qual) {
-        auto [left, right] = split_qual_name(name_or_qual);
-        const std::string want = to_lower(right.empty() ? left : right);
+    // 大小写不敏感找列（语义/执行都会用到）
+    inline std::optional<size_t> find_col_ci(const TableDef& td, const std::string& n) {
+        auto tolow = [](const std::string& s) {
+            std::string o = s; for (auto& c : o) c = (char)std::tolower((unsigned char)c); return o;
+            };
+        std::string tgt = tolow(n);
         for (size_t i = 0; i < td.columns.size(); ++i) {
-            if (to_lower(td.columns[i].name) == want) return i;
+            if (tolow(td.columns[i].name) == tgt) return i;
         }
         return std::nullopt;
     }

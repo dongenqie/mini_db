@@ -20,7 +20,7 @@ namespace minidb {
         // 类型
         "INT","TINYINT","CHAR","VARCHAR","DECIMAL","TIMESTAMP","FLOAT",
         // 在 KW 集合里补齐（如果还没加）：
-        "SHOW","USE","DATABASE","DATABASES","DESCRIBE", // DESC 已经有但在 ORDER 场景
+        "SHOW","USE","DATABASE","DATABASES","TABLES","DESCRIBE", // DESC 已经有但在 ORDER 场景
         "ALTER","RENAME","TO","CHAR","AFTER"
         // 逻辑 / 约束
         "AND","OR","NOT","NULL","UNSIGNED","DEFAULT","COMMENT",
@@ -141,18 +141,42 @@ namespace minidb {
     Token Lexer::number() {
         int sl = line_, sc = col_;
         std::string buf;
+
+        // 整数部分
         while (i_ < s_.size() && std::isdigit((unsigned char)look())) {
             buf.push_back(look()); adv();
         }
+
+        // 可选：小数部分
+        if (i_ < s_.size() && look() == '.') {
+            // 先看后面至少有一个数字，否则把 '.' 交回给上层作为单独 token
+            if (std::isdigit((unsigned char)look_ahead(1))) {
+                buf.push_back(look()); adv(); // 吃掉 '.'
+                while (i_ < s_.size() && std::isdigit((unsigned char)look())) {
+                    buf.push_back(look()); adv();
+                }
+                // 不动 Parser/AST：带小数的常量以“字符串常量”交回
+                // 这样 UPDATE/INSERT 里的 66.66 会被当作 STRCONST，后端执行时会做数值比较
+                return Token{ TokenType::STRCONST, buf, sl, sc, LexCategory::CONSTANT };
+            }
+            // 否则就把整数部分当 INTCONST 返回，'.' 留给上层处理
+        }
+
         return Token{ TokenType::INTCONST, buf, sl, sc, LexCategory::CONSTANT };
     }
+
 
     // 支持：
     // 1) 反斜杠转义：\' \\ \n \t ...
     // 2) SQL 单引号转义：'' -> 一个单引号
+    // 原先的 string() 定义改为简单转调：
     Token Lexer::string() {
+        return string_with('\'');
+    }
+
+    Token Lexer::string_with(char quote_char) {
         int sl = line_, sc = col_;
-        // 当前 look()=='\''
+        // 当前 look()==quote_char
         adv(); // 吃掉开引号
         std::string buf;
         bool closed = false;
@@ -168,15 +192,16 @@ namespace minidb {
                 case 't': buf.push_back('\t'); break;
                 case '\\': buf.push_back('\\'); break;
                 case '\'': buf.push_back('\''); break;
+                case '"': buf.push_back('"'); break;
                 default: buf.push_back(e); break;
                 }
                 adv();
                 continue;
             }
-            if (c == '\'') {
-                // SQL 风格：'' -> '
-                if (look_ahead(1) == '\'') {
-                    buf.push_back('\''); adv(); adv();
+            if (c == quote_char) {
+                // SQL 风格：'' 或 "" -> 一个引号
+                if (look_ahead(1) == quote_char) {
+                    buf.push_back(quote_char); adv(); adv();
                     continue;
                 }
                 // 关闭
@@ -274,7 +299,8 @@ namespace minidb {
             if (look_ahead(1) == '=') { adv(); adv(); return make_simple(TokenType::GE, ">=", sl, sc, LexCategory::OPERATOR); }
             adv(); return make_simple(TokenType::GT, ">", sl, sc, LexCategory::OPERATOR);
 
-        case '\'': return string();
+        case '\'': return string();                 // 单引号保持不变
+        case '"':  return string_with('"');         // 新增：双引号
         }
 
         // 其它非法字符

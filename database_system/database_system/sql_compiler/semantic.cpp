@@ -22,6 +22,31 @@ namespace {
         return "?";
     }
 
+    // —— 表达式类型推断 —— //
+// 支持：
+//  - IntLit => INT32
+//  - StrLit 若文本形如 123 或 66.66，可视作数字常量（用于与 FLOAT/DECIMAL 匹配）
+//  - ColRef => 列定义的类型
+    static bool is_integer_like(const std::string& s) {
+        if (s.empty()) return false;
+        size_t i = 0;
+        if (s[0] == '+' || s[0] == '-') i++;
+        if (i >= s.size()) return false;
+        for (; i < s.size(); ++i) if (!std::isdigit((unsigned char)s[i])) return false;
+        return true;
+    }
+    static bool is_decimal_like(const std::string& s) {
+        if (s.empty()) return false;
+        size_t i = 0; int dots = 0; int digits = 0;
+        if (s[0] == '+' || s[0] == '-') i++;
+        for (; i < s.size(); ++i) {
+            if (s[i] == '.') { dots++; if (dots > 1) return false; }
+            else if (std::isdigit((unsigned char)s[i])) { digits++; }
+            else return false;
+        }
+        return digits > 0 && dots == 1;
+    }
+
     // 你在 SELECT/DELETE/UPDATE 的四元式里调用的 render_expr 就是它
     static std::string render_expr(const Expr* e) {
         if (!e) return "-";
@@ -83,37 +108,42 @@ namespace minidb {
     }
 
     // —— CREATE —— //
+    static const char* DtName(DataType dt) {
+        switch (dt) {
+        case DataType::INT32:     return "INT";
+        case DataType::TINYINT:   return "TINYINT";
+        case DataType::FLOAT:     return "FLOAT";
+        case DataType::CHAR:      return "CHAR";
+        case DataType::VARCHAR:   return "VARCHAR";
+        case DataType::DECIMAL:   return "DECIMAL";
+        case DataType::TIMESTAMP: return "TIMESTAMP";
+        default:                  return "VARCHAR";
+        }
+    }
     Status SemanticAnalyzer::check_create(const CreateTableStmt* s, std::vector<Quad>& q) {
         if (cat_.get_table(to_lower(s->def.name)))
             return Status::Error("[SemanticError, table, Table already exists: " + s->def.name + "]");
         if (s->def.columns.empty())
             return Status::Error("[SemanticError, column, Empty column list]");
 
-        // 列重名（大小写不敏感）
         std::unordered_set<std::string> seen;
         for (auto& c : s->def.columns) {
             std::string key = to_lower(c.name);
             if (!seen.insert(key).second)
                 return Status::Error("[SemanticError, column, Duplicate column: " + c.name + "]");
         }
-        // 过程：逐个列产生 COLDEF，再 CREATE，再 RESULT 汇总
+
         std::vector<std::string> t_list;
-        auto next_tmp = [&]() {
-            return std::string("T") + std::to_string((int)q.size());
-            };
+        auto next_tmp = [&]() { return std::string("T") + std::to_string((int)q.size()); };
 
         for (auto& c : s->def.columns) {
             std::string t = next_tmp();
-            q.push_back(Quad{ "COLDEF",
-                              c.name,
-                              (c.type == DataType::INT32 ? "INT" : "VARCHAR"),
-                              t });
+            q.push_back(Quad{ "COLDEF", c.name, DtName(c.type), t });
             t_list.push_back(t);
         }
 
         q.push_back(Quad{ "CREATE", s->def.name, "-", "-" });
 
-        // RESULT: T0,T1,... 代表列定义过程
         std::string arg1;
         for (size_t i = 0; i < t_list.size(); ++i) {
             if (i) arg1 += ",";
@@ -149,24 +179,31 @@ namespace minidb {
             }
         }
 
-        // 类型检查（INSERT 里允许未加引号的标识符作为 VARCHAR 字面量）
+        // 类型检查（INSERT 里允许未加引号的标识符作为 VARCHAR 字面量）+ 数值放宽
+        auto is_numeric_compatible = [](DataType want, DataType got) {
+            if (want == got) return true;
+            // 允许 INT32 和 FLOAT/DECIMAL 互转（最小放宽）
+            if ((want == DataType::INT32 || want == DataType::FLOAT || want == DataType::DECIMAL) &&
+                (got == DataType::INT32 || got == DataType::FLOAT || got == DataType::DECIMAL))
+                return true;
+            return false;
+            };
+
         for (size_t j = 0; j < s->values.size(); ++j) {
             const auto target_ty = td.columns[pos[j]].type;
 
-            // 如果是裸标识符（ColRef），在 INSERT 语境下把它视作 VARCHAR 字面量
             if (dynamic_cast<const ColRef*>(s->values[j].get())) {
                 if (target_ty != DataType::VARCHAR) {
                     return Status::Error("[SemanticError, type, Type mismatch for column "
                         + td.columns[pos[j]].name + "]");
                 }
-                continue; // 通过
+                continue;
             }
 
-            // 其他情况仍按常规规则检查（IntLit/StrLit/比较出错等）
             Status tmp = Status::OK();
             auto t = expr_type(s->values[j].get(), td, tmp);
             if (!tmp.ok) return tmp;
-            if (!t || *t != target_ty) {
+            if (!t || !is_numeric_compatible(target_ty, *t)) {
                 return Status::Error("[SemanticError, type, Type mismatch for column "
                     + td.columns[pos[j]].name + "]");
             }
@@ -356,7 +393,14 @@ namespace minidb {
             return Status::Error("[SemanticError, table, Unknown table: " + s->table + "]");
         const TableDef& td = *tdopt;
 
-        // SET 检查 + 四元式
+        auto is_numeric_compatible = [](DataType want, DataType got) {
+            if (want == got) return true;
+            if ((want == DataType::INT32 || want == DataType::FLOAT || want == DataType::DECIMAL) &&
+                (got == DataType::INT32 || got == DataType::FLOAT || got == DataType::DECIMAL))
+                return true;
+            return false;
+            };
+
         for (auto& kv : s->sets) {
             const std::string& col = kv.first;
             auto idx = find_col_ci(td, col);
@@ -364,12 +408,12 @@ namespace minidb {
             Status tmp = Status::OK();
             auto t = expr_type(kv.second.get(), td, tmp);
             if (!tmp.ok) return tmp;
-            if (!t || *t != td.columns[*idx].type)
+            if (!t || !is_numeric_compatible(td.columns[*idx].type, *t))
                 return Status::Error("[SemanticError, type, Type mismatch for column " + td.columns[*idx].name + "]");
 
-            // 四元式：SET col = expr
             q.push_back(Quad{ "SET", td.columns[*idx].name, render_expr(kv.second.get()), "-" });
         }
+
 
         // WHERE 表达式类型检查
         if (s->where) {

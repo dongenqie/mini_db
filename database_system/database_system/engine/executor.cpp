@@ -10,6 +10,10 @@
 #include <algorithm>
 #include <fstream>
 #include <filesystem>
+#include <functional> 
+#include <unordered_set> 
+#include <chrono>
+#include <ctime>
 
 // 统一使用“引擎”的列/类型，避免与 minidb::Column 冲突
 using EngColumn = ::Column;
@@ -320,6 +324,13 @@ static void print_boxed_table(const std::vector<std::string>& headers,
     line();
 }
 
+static inline std::string trim_all(const std::string& s) {
+    size_t b = 0, e = s.size();
+    while (b < e && std::isspace((unsigned char)s[b])) ++b;
+    while (e > b && std::isspace((unsigned char)s[e - 1])) --e;
+    return s.substr(b, e - b);
+}
+
 
 // ==========================
 // Parse & Dispatch SQL
@@ -419,64 +430,103 @@ bool Executor::Execute(const std::string& sql) {
 
         return ExecuteCreateTable(tableName, columns, tableName + ".tbl");
     }
-
     else if (command == "INSERT") {
-        std::string tmp, tableName;
-        iss >> tmp >> tableName; // INTO tableName
-        iss >> tmp;              // VALUES
+        // 语法支持：
+        // INSERT INTO t [(c1,c2,...)] VALUES (v1,v2,...);
+        std::string intoKw, tableName;
+        if (!(iss >> intoKw) || upper1(intoKw) != "INTO") {
+            std::cerr << "INSERT: expect INTO\n"; return false;
+        }
+        if (!(iss >> tableName)) { std::cerr << "INSERT: expect table name\n"; return false; }
 
-        // 把余下整行拿出来做“( ... )”内解析，避免把 ')' 或 ';' 混进值
-        std::string rest, piece;
+        // 可选列清单
+        std::vector<std::string> colList;
         {
-            std::ostringstream os;
-            while (std::getline(iss, piece)) {
-                os << piece;
+            std::streampos pos = iss.tellg();
+            char ch;
+            if (iss >> ch && ch == '(') {
+                // 读到对应 ')'
+                std::string inside; int par = 1; char c;
+                while (iss.get(c)) {
+                    if (c == '(') ++par;
+                    else if (c == ')' && --par == 0) break;
+                    inside.push_back(c);
+                }
+                // split by ','
+                auto items = split_items_respecting_paren(inside);
+                for (auto& x : items) colList.push_back(trim1(x));
             }
-            rest = os.str();
+            else {
+                iss.clear(); iss.seekg(pos);
+            }
         }
 
-        // 找到第一个 '(' 和与之匹配的最后一个 ')'
+        // 读取 VALUES
+        std::string valuesKw;
+        if (!(iss >> valuesKw) || upper1(valuesKw) != "VALUES") {
+            std::cerr << "INSERT: expect VALUES\n"; return false;
+        }
+
+        // 读第一组括号内值（当前先实现单行插入；多行可循环解析多个 () 组）
+        std::string rest; { std::ostringstream os; std::string piece; while (std::getline(iss, piece)) os << piece; rest = os.str(); }
         auto lp = rest.find('(');
-        auto rp = rest.rfind(')');
+        auto rp = rest.find(')', lp == std::string::npos ? 0 : lp + 1);
         if (lp == std::string::npos || rp == std::string::npos || rp <= lp) {
-            std::cerr << "INSERT parse error: missing parentheses.\n";
-            return false;
+            std::cerr << "INSERT: bad VALUES list\n"; return false;
         }
         std::string inside = rest.substr(lp + 1, rp - lp - 1);
+        auto rawVals = split_items_respecting_paren(inside);
 
-        // 切分逗号
-        std::vector<std::string> values;
-        {
-            std::istringstream vs(inside);
-            std::string tok;
-            while (std::getline(vs, tok, ',')) {
-                // 统一清洗：去首尾空白、去掉尾随的 ';'、去掉首尾引号
-                auto ltrim = [](std::string& s) {
-                    size_t i = 0;
-                    while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) ++i;
-                    if (i) s.erase(0, i);
-                    };
-                auto rtrim = [](std::string& s) {
-                    while (!s.empty()) {
-                        char c = s.back();
-                        if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ';') s.pop_back();
-                        else break;
+        // Password() 简化处理：Password("x") / PASSWORD('x') => PWD{原文}
+        auto normalize_val = [](std::string s)->std::string {
+            std::string upperS = up(s);
+            auto starts = [&](const char* p) { return upperS.rfind(p, 0) == 0; };
+
+            if (starts("PASSWORD(")) {
+                auto lp = s.find('('), rp = s.rfind(')');
+                if (lp != std::string::npos && rp != std::string::npos && rp > lp + 1) {
+                    std::string inner = trim1(s.substr(lp + 1, rp - lp - 1));
+                    // 去首尾引号
+                    if (inner.size() >= 2 &&
+                        ((inner.front() == '"' && inner.back() == '"') ||
+                            (inner.front() == '\'' && inner.back() == '\''))) {
+                        inner = inner.substr(1, inner.size() - 2);
                     }
-                    };
-                ltrim(tok);
-                rtrim(tok);
-                // 去包裹引号（支持 'x' 或 "x"）
-                if (tok.size() >= 2) {
-                    if ((tok.front() == '\'' && tok.back() == '\'') ||
-                        (tok.front() == '\"' && tok.back() == '\"')) {
-                        tok = tok.substr(1, tok.size() - 2);
-                    }
+                    return std::string("PWD{") + inner + "}";
                 }
-                values.push_back(tok);
+            }
+            // 普通字面量：去首尾引号
+            if (s.size() >= 2 &&
+                ((s.front() == '"' && s.back() == '"') ||
+                    (s.front() == '\'' && s.back() == '\''))) {
+                s = s.substr(1, s.size() - 2);
+            }
+            return s;
+        };
+        for (auto& v : rawVals) v = normalize_val(v);
+
+        // 若提供列清单，需要按表模式对齐
+        TableInfo* tmeta = catalog.GetTable(tableName);
+        if (!tmeta) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
+        const auto& cols = tmeta->getSchema().GetColumns();
+
+        std::vector<std::string> finalRow(cols.size(), "");
+        if (!colList.empty()) {
+            if (colList.size() != rawVals.size()) { std::cerr << "INSERT: columns and values size mismatch\n"; return false; }
+            // 建索引
+            for (size_t i = 0; i < colList.size(); ++i) {
+                int idx = -1;
+                for (int j = 0; j < (int)cols.size(); ++j) if (cols[j].name == colList[i]) { idx = j; break; }
+                if (idx < 0) { std::cerr << "INSERT: column not found: " << colList[i] << "\n"; return false; }
+                finalRow[idx] = rawVals[i];
             }
         }
+        else {
+            // 无列清单，按列顺序塞
+            finalRow = rawVals;
+        }
 
-        return ExecuteInsert(tableName, values);
+        return ExecuteInsert(tableName, finalRow);
     }
     else if (command == "SELECT") {
         std::vector<std::string> cols;
@@ -701,7 +751,148 @@ bool Executor::Execute(const std::string& sql) {
         std::cerr << "ALTER TABLE: unsupported action\n";
         return false;
         }  // <== 结束 if (command == "ALTER")
+    else if (command == "UPDATE") {
+        // 语法支持（手写解析）：
+        // UPDATE <table>
+        //   SET c1 = v1, c2 = v2, ...
+        //   [WHERE <col> = val
+        //     | <col> IN (v1, v2, ...)
+        //     | <col> BETWEEN lo AND hi
+        //     | a=1 AND b="x" AND ... ]
+        std::string tableName;
+        if (!(iss >> tableName)) { std::cerr << "UPDATE: expect table name\n"; return false; }
 
+        std::string setKw;
+        if (!(iss >> setKw) || upper1(setKw) != "SET") {
+            std::cerr << "UPDATE: expect SET\n"; return false;
+        }
+
+        // 读取 SET 后面直到流末尾，按 WHERE 切开
+        std::string rest; {
+            std::ostringstream os; std::string piece;
+            while (std::getline(iss, piece)) os << piece;
+            rest = os.str();
+        }
+        auto UP = [](std::string s) { for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; };
+        auto find_where_pos = [&](const std::string& s)->size_t {
+            std::string S = UP(s);
+            return S.find(" WHERE ");
+            };
+
+        std::string set_part, where_part;
+        {
+            // 兼容无空格样式：...SET a=1 WHERE... / 末尾分号
+            rest = trim1(rest);
+            // 去掉尾分号
+            if (!rest.empty() && rest.back() == ';') rest.pop_back();
+            size_t wpos = find_where_pos(rest);
+            if (wpos == std::string::npos) { set_part = trim1(rest); }
+            else {
+                set_part = trim1(rest.substr(0, wpos));
+                where_part = trim1(rest.substr(wpos + std::string(" WHERE ").size()));
+            }
+        }
+
+        // 解析 SET 列表
+        std::vector<std::pair<std::string, std::string>> sets;
+        {
+            auto items = split_items_respecting_paren(set_part);
+            if (items.empty()) { std::cerr << "UPDATE: empty SET list\n"; return false; }
+
+            auto dequote = [](std::string s)->std::string {
+                s = trim1(s);
+                if (s.size() >= 2 &&
+                    ((s.front() == '"' && s.back() == '"') || (s.front() == '\'' && s.back() == '\''))) {
+                    return s.substr(1, s.size() - 2);
+                }
+                return s;
+                };
+
+            for (auto& it : items) {
+                auto eq = it.find('=');
+                if (eq == std::string::npos) { std::cerr << "UPDATE: bad SET item: " << it << "\n"; return false; }
+                std::string c = trim1(it.substr(0, eq));
+                std::string v = trim1(it.substr(eq + 1));
+                v = dequote(v);
+                sets.emplace_back(c, v);
+            }
+        }
+
+        // 解析 WHERE（支持 EQ / IN(...) / BETWEEN ... AND ... / 多个等值 AND）
+        std::string whereCol;
+        std::vector<std::string> whereInVals;
+        std::pair<std::string, std::string> whereBetween;
+        std::string whereEqVal;  // 对 EQ 模式：右值；对 AND 模式：整个 "a=1 AND b=2"
+        int whereMode = 0;       // 0=无,1=EQ/AND,2=IN,3=BETWEEN
+
+        if (!where_part.empty()) {
+            std::string WUP = UP(where_part);
+
+            // IN (...)
+            auto inPos = WUP.find(" IN ");
+            if (inPos != std::string::npos) {
+                whereMode = 2;
+                whereCol = trim1(where_part.substr(0, inPos));
+                // 括号里的值列表
+                auto lp = where_part.find('(', inPos);
+                auto rp = (lp == std::string::npos) ? std::string::npos : where_part.find(')', lp + 1);
+                if (lp == std::string::npos || rp == std::string::npos || rp <= lp + 1) {
+                    std::cerr << "UPDATE WHERE IN: bad list\n"; return false;
+                }
+                std::string inside = where_part.substr(lp + 1, rp - lp - 1);
+                auto vals = split_items_respecting_paren(inside);
+                auto deq = [](std::string s) { s = trim1(s);
+                if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') || (s.front() == '\'' && s.back() == '\''))) s = s.substr(1, s.size() - 2);
+                return s;
+                    };
+                for (auto& v : vals) whereInVals.push_back(deq(v));
+            }
+            // BETWEEN lo AND hi
+            else if (WUP.find(" BETWEEN ") != std::string::npos) {
+                whereMode = 3;
+                auto bp = WUP.find(" BETWEEN ");
+                whereCol = trim1(where_part.substr(0, bp));
+                std::string tail = trim1(where_part.substr(bp + std::string(" BETWEEN ").size()));
+                // tail: lo AND hi
+                std::string TUP = UP(tail);
+                auto andp = TUP.find(" AND ");
+                if (andp == std::string::npos) { std::cerr << "UPDATE WHERE BETWEEN: expect AND\n"; return false; }
+                auto deq = [](std::string s) { s = trim1(s);
+                if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') || (s.front() == '\'' && s.back() == '\''))) s = s.substr(1, s.size() - 2);
+                return s;
+                    };
+                whereBetween.first = deq(tail.substr(0, andp));
+                whereBetween.second = deq(tail.substr(andp + 5));
+            }
+            // a=1 AND b=2 ...（或者简单 a=1）
+            else {
+                whereMode = 1;
+                // 如果是 AND 合取，整个条件字符串交给 ExecuteUpdate 里做细分
+                // 否则就是简单 col=val
+                if (WUP.find(" AND ") != std::string::npos) {
+                    whereEqVal = where_part;  // 整串交给后面“AND 细分”逻辑
+                }
+                else {
+                    auto eq = where_part.find('=');
+                    if (eq == std::string::npos) { std::cerr << "UPDATE WHERE: expect '='\n"; return false; }
+                    whereCol = trim1(where_part.substr(0, eq));
+                    whereEqVal = trim1(where_part.substr(eq + 1));
+                    if (whereEqVal.size() >= 2 &&
+                        ((whereEqVal.front() == '"' && whereEqVal.back() == '"') || (whereEqVal.front() == '\'' && whereEqVal.back() == '\'')))
+                        whereEqVal = whereEqVal.substr(1, whereEqVal.size() - 2);
+                }
+            }
+        }
+
+        return ExecuteUpdate(tableName, sets, whereCol, whereInVals, whereBetween, whereEqVal, whereMode);
+    }
+    else if (command == "TRUNCATE") {
+        std::string kw, tableName;
+        if (!(iss >> kw) || upper1(kw) != "TABLE") { std::cerr << "TRUNCATE: expect TABLE\n"; return false; }
+        if (!(iss >> tableName)) { std::cerr << "TRUNCATE: expect table name\n"; return false; }
+        tableName = trim_semicolon(tableName);
+        return ExecuteTruncate(tableName);
+    }
     else {
             std::cerr << "Unknown command: " << command << "\n";
             return false;
@@ -729,16 +920,70 @@ bool Executor::ExecuteCreateTable(const std::string& tableName,
 // ==========================
 // INSERT
 // ==========================
+// ==========================
+// INSERT
+// ==========================
 bool Executor::ExecuteInsert(const std::string& tableName,
     const std::vector<std::string>& values) {
     TableInfo* table = catalog.GetTable(tableName);
-    if (!table) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
+    if (!table) {
+        std::cerr << "Error: table " << tableName << " not found.\n";
+        return false;
+    }
 
-    if (!storage.Insert(tableName, values)) {
-        std::cerr << "Insert failed.\n"; return false;
+    // 先把调用方传来的 values 拷贝一份，后续在这份副本上应用默认值/补齐长度
+    std::vector<std::string> row = values;
+
+    const auto& schemaCols = table->getSchema().GetColumns();
+
+    // 统一长度：让 row 至少与列数等长
+    if (row.size() < schemaCols.size()) row.resize(schemaCols.size());
+
+    // 小工具：当前本地日期（如需时分秒可把下面那行改成 "%Y-%m-%d %H:%M:%S"）
+    auto now_str = []() {
+        std::time_t t = std::time(nullptr);
+        std::tm tm{};
+#ifdef _WIN32
+        localtime_s(&tm, &t);
+#else
+        localtime_r(&t, &tm);
+#endif
+        char buf[20];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tm);
+        return std::string(buf);
+        };
+
+    // 对于“未提供值或提供为空串”的列，按列定义补默认值
+    for (size_t i = 0; i < schemaCols.size(); ++i) {
+        if (!row[i].empty()) continue; // 已有值则跳过
+
+        // TIMESTAMP：默认 CURRENT_TIMESTAMP（或未显式写 default 时也给当前时间）
+        if (schemaCols[i].type == ColumnType::TIMESTAMP) {
+            if (schemaCols[i].default_value.empty() ||
+                upper1(schemaCols[i].default_value) == "CURRENT_TIMESTAMP") {
+                row[i] = now_str();
+                continue;
+            }
+            else {
+                row[i] = schemaCols[i].default_value;
+                continue;
+            }
+        }
+
+        // 其他类型：若定义了 DEFAULT 则使用
+        if (!schemaCols[i].default_value.empty()) {
+            row[i] = schemaCols[i].default_value;
+        }
+    }
+
+    // 入存储层
+    if (!storage.Insert(tableName, row)) {
+        std::cerr << "Insert failed.\n";
+        return false;
     }
     return true;
 }
+
 
 // ==========================
 // SELECT
@@ -869,7 +1114,6 @@ bool Executor::ExecuteDropTable(const std::string& tableName, bool if_exists) {
     return false;
 }
 
-
 bool Executor::ExecuteDesc(const std::string& tableName) {
     TableInfo* t = catalog.GetTable(tableName);
     if (!t) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
@@ -926,7 +1170,6 @@ bool Executor::ExecuteDesc(const std::string& tableName) {
     return true;
 }
 
-
 bool Executor::ExecuteShowCreate(const std::string& tableName) {
     TableInfo* t = catalog.GetTable(tableName);
     if (!t) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
@@ -950,7 +1193,6 @@ bool Executor::ExecuteShowCreate(const std::string& tableName) {
     std::cout << ddl.str() << "\n";
     return true;
 }
-
 
 bool Executor::ExecuteAlterRename(const std::string& oldName, const std::string& newName) {
     if (catalogManager.RenameTable(catalog, oldName, newName)) {
@@ -1024,6 +1266,228 @@ bool Executor::ExecuteShowDatabases() {
     }
     return true;
 }
+
+bool Executor::ExecuteTruncate(const std::string& tableName) {
+    TableInfo* t = catalog.GetTable(tableName);
+    if (!t) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
+    if (!storage.TruncateTable(tableName)) {
+        std::cerr << "TRUNCATE failed.\n"; return false;
+    }
+    std::cout << "Table '" << tableName << "' truncated.\n";
+    return true;
+}
+
+// ==========================
+// UPDATE（手写执行器实现，用于 IN / BETWEEN / AND）
+// ==========================
+bool Executor::ExecuteUpdate(
+    const std::string& tableName,
+    const std::vector<std::pair<std::string, std::string>>& sets,
+    const std::string& whereCol,
+    const std::vector<std::string>& whereInVals,
+    const std::pair<std::string, std::string>& whereBetween,
+    const std::string& whereEqVal,
+    int whereMode /*0=NONE,1=EQ,2=IN,3=BETWEEN*/)
+{
+    TableInfo* table = catalog.GetTable(tableName);
+    if (!table) {
+        std::cerr << "Unknown table: " << tableName << "\n";
+        return false;
+    }
+
+    const auto& cols = table->getSchema().GetColumns();
+
+    // 建立列名 -> 下标
+    auto col_index = [&](const std::string& name)->int {
+        for (int i = 0; i < (int)cols.size(); ++i)
+            if (cols[i].name == name) return i;
+        return -1;
+        };
+
+    // 解析 SET 目标：列下标 + 赋值字符串（存储层是字符串向量）
+    struct SetAssign { int idx; std::string val; };
+    std::vector<SetAssign> assigns;
+    assigns.reserve(sets.size());
+    for (auto& kv : sets) {
+        int idx = col_index(kv.first);
+        if (idx < 0) {
+            std::cerr << "UPDATE: column not found: " << kv.first << "\n";
+            return false;
+        }
+        assigns.push_back({ idx, kv.second });
+    }
+
+    // WHERE 列信息
+    int whereIdx = -1;
+    ColumnType whereColType = ColumnType::VARCHAR;
+
+    // === 修复点：如果是 AND 合取，就不要做“单列 whereCol 必须存在”的检查 ===
+    bool is_and_combo = (whereMode == 1 && whereEqVal.find(" AND ") != std::string::npos);
+
+
+    if (whereMode != 0 && !is_and_combo) {
+        whereIdx = col_index(whereCol);
+        if (whereIdx < 0) {
+            std::cerr << "UPDATE: WHERE column not found: " << whereCol << "\n";
+            return false;
+        }
+        whereColType = cols[whereIdx].type;
+    }
+
+    // 小工具：把字符串尝试为数值
+    auto to_number = [](const std::string& s, double& out)->bool {
+        try {
+            size_t pos = 0;
+            out = std::stod(s, &pos);
+            // 允许末尾空白
+            while (pos < s.size() && isspace((unsigned char)s[pos])) ++pos;
+            return pos == s.size();
+        }
+        catch (...) { return false; }
+        };
+
+    // 谓词判断
+    auto match = [&](const std::vector<std::string>& row)->bool {
+        if (whereMode == 0) return true;
+        if (whereIdx < 0 || whereIdx >= (int)row.size()) return false;
+
+        const std::string& cell = row[whereIdx];
+
+        // 统一做“按列类型”的比较
+        const bool numeric_col =
+            (whereColType == ColumnType::INT ||
+                whereColType == ColumnType::TINYINT ||
+                whereColType == ColumnType::FLOAT ||
+                whereColType == ColumnType::DECIMAL);
+
+        if (whereMode == 1) { // EQ
+            if (numeric_col) {
+                double a = 0, b = 0;
+                if (!to_number(cell, a) || !to_number(whereEqVal, b)) return false;
+                return a == b;
+            }
+            else {
+                return cell == whereEqVal;
+            }
+        }
+        else if (whereMode == 2) { // IN
+            if (numeric_col) {
+                double a = 0; if (!to_number(cell, a)) return false;
+                for (auto& v : whereInVals) {
+                    double b = 0; if (to_number(v, b) && a == b) return true;
+                }
+                return false;
+            }
+            else {
+                for (auto& v : whereInVals) if (cell == v) return true;
+                return false;
+            }
+        }
+        else if (whereMode == 3) { // BETWEEN [lo, hi]
+            if (numeric_col) {
+                double x = 0, lo = 0, hi = 0;
+                if (!to_number(cell, x)) return false;
+                if (!to_number(whereBetween.first, lo)) return false;
+                if (!to_number(whereBetween.second, hi)) return false;
+                return (x >= lo && x <= hi);
+            }
+            else {
+                // 字符串 BETWEEN 使用字典序
+                const std::string& lo = whereBetween.first;
+                const std::string& hi = whereBetween.second;
+                return (cell >= lo && cell <= hi);
+            }
+        }
+        return false;
+        };
+
+    // 拉取所有行，逐行判断并更新
+    auto rows = storage.SelectAll(tableName);
+    size_t affected = 0;
+
+    // 如果 WHERE 子句里写了 AND（例如 "age=22 AND id=2"），
+    // 你前面的解析阶段会把整段放在 whereEqVal 里；这里做一个兜底切分，
+    // 逐个等值判断（全部满足才命中）。IN/BETWEEN 情况由上面的 whereMode 单独处理。
+    std::vector<std::pair<int, std::string>> and_eq_conds; // (idx, val)
+    if (whereMode == 1 && whereEqVal.find(" AND ") != std::string::npos) {
+        // 只处理 col=val AND col=val 的简单合取
+        std::string U = whereEqVal;
+        // 拆分：age=22 AND id=2 -> ["age=22", "id=2"]
+        std::vector<std::string> parts;
+        {
+            size_t p = 0;
+            while (p < U.size()) {
+                size_t q = U.find(" AND ", p);
+                std::string seg = (q == std::string::npos) ? U.substr(p) : U.substr(p, q - p);
+                if (!trim1(seg).empty()) parts.push_back(trim1(seg));
+                if (q == std::string::npos) break;
+                p = q + 5;
+            }
+        }
+        and_eq_conds.clear();
+        for (auto& seg : parts) {
+            auto eq = seg.find('=');
+            if (eq == std::string::npos) { and_eq_conds.clear(); break; }
+            std::string c = trim1(seg.substr(0, eq));
+            std::string v = trim1(seg.substr(eq + 1));
+            if (v.size() >= 2 &&
+                ((v.front() == '"' && v.back() == '"') || (v.front() == '\'' && v.back() == '\'')))
+                v = v.substr(1, v.size() - 2);
+            int idx = col_index(c);
+            if (idx < 0) { and_eq_conds.clear(); break; }
+            and_eq_conds.emplace_back(idx, v);
+        }
+    }
+
+    auto match_with_and = [&](const std::vector<std::string>& row)->bool {
+        if (!and_eq_conds.empty()) {
+            // 需要全部等值命中
+            for (auto& [idx, val] : and_eq_conds) {
+                if (idx < 0 || idx >= (int)row.size()) return false;
+                // 这里按字符串比较即可（等值），数值也能匹配到
+                if (row[idx] != val) return false;
+            }
+            return true;
+        }
+        return match(row);
+        };
+
+    // 先拷贝一份，命中行在副本上改
+    std::vector<std::vector<std::string>> newRows = rows;
+
+    // 命中才改
+    for (size_t r = 0; r < rows.size(); ++r) {
+        if (!match_with_and(rows[r])) continue;
+
+        auto& newRow = newRows[r];
+        for (auto& a : assigns) {
+            if (a.idx >= 0 && a.idx < (int)newRow.size()) {
+                newRow[a.idx] = a.val;
+            }
+        }
+        ++affected;
+    }
+
+    // 统一写回：TRUNCATE + 逐行 INSERT（仅当有修改时）
+    if (affected > 0) {
+        if (!storage.TruncateTable(tableName)) {
+            std::cerr << "Update failed: truncate.\n";
+            return false;
+        }
+        for (auto& nr : newRows) {
+            if (!storage.Insert(tableName, nr)) {
+                std::cerr << "Update failed: reinsert.\n";
+                return false;
+            }
+        }
+    }
+
+    std::cout << "[RecordManager] Update finished.\n";
+    return true;
+
+}
+
+
 
 namespace {
 
@@ -1104,7 +1568,6 @@ bool Executor::ExecutePlan(const minidb::Plan& plan) {
     }
     return ExecuteInsert(root->table, values);
 }
-
     case PlanOp::PROJECT: {
         // SELECT：PROJECT(Filter?(SeqScan))
         const PlanNode* scan = find_node(root, PlanOp::SEQSCAN);
@@ -1144,6 +1607,123 @@ bool Executor::ExecutePlan(const minidb::Plan& plan) {
         // root->table 是要删的表名；root->if_exists 标识 IF EXISTS
         return ExecuteDropTable(root->table, root->if_exists);
     }
+    case PlanOp::UPDATE: {
+        // —— 只走 planner 路径：用 plan 中的 update_sets 与 predicate 执行 —— //
+        TableInfo* table = catalog.GetTable(root->table);
+        if (!table) { std::cerr << "Unknown table: " << root->table << "\n"; return false; }
+
+        const auto& cols = table->getSchema().GetColumns();
+
+        // 建立列名 -> 下标索引
+        std::unordered_map<std::string, int> col_idx;
+        for (int i = 0; i < (int)cols.size(); ++i) col_idx.emplace(cols[i].name, i);
+
+        // 1) 解析 SET：仅支持常量（Int/Str），列到列暂不支持
+        std::vector<std::pair<int, std::string>> sets_by_idx; // (colIdx, valueStr)
+        sets_by_idx.reserve(root->update_sets.size());
+
+        auto eval_const_to_string = [](const minidb::Expr* e, std::string& out)->bool {
+            if (auto pInt = dynamic_cast<const minidb::IntLit*>(e)) { out = std::to_string(pInt->v); return true; }
+            if (auto pStr = dynamic_cast<const minidb::StrLit*>(e)) { out = pStr->v; return true; }
+            return false; // 其他表达式暂不支持
+            };
+
+        for (auto& kv : root->update_sets) {
+            const std::string& colName = kv.first;
+            auto it = col_idx.find(colName);
+            if (it == col_idx.end()) {
+                std::cerr << "UPDATE: column not found: " << colName << "\n";
+                return false;
+            }
+            std::string val;
+            if (!eval_const_to_string(kv.second.get(), val)) {
+                std::cerr << "Unsupported UPDATE value expr (only constants supported).\n";
+                return false;
+            }
+            sets_by_idx.emplace_back(it->second, std::move(val));
+        }
+
+        // 2) 构造谓词：当前 planner 只会生成 CmpExpr(left col, right const)
+        std::function<bool(const std::vector<std::string>&)> pred;
+
+        if (root->predicate) {
+            auto* cmp = dynamic_cast<const minidb::CmpExpr*>(root->predicate.get());
+            if (!cmp) {
+                std::cerr << "Unsupported UPDATE predicate in planner path.\n";
+                return false;
+            }
+            auto* lhsCol = dynamic_cast<const minidb::ColRef*>(cmp->lhs.get());
+            if (!lhsCol) {
+                std::cerr << "UPDATE WHERE: LHS must be column.\n";
+                return false;
+            }
+            auto it = col_idx.find(lhsCol->name);
+            if (it == col_idx.end()) {
+                std::cerr << "UPDATE WHERE: column not found: " << lhsCol->name << "\n";
+                return false;
+            }
+            const int widx = it->second;
+
+            std::string rval;
+            if (!eval_const_to_string(cmp->rhs.get(), rval)) {
+                std::cerr << "UPDATE WHERE: RHS must be constant.\n";
+                return false;
+            }
+
+            // 数字/字符串混合比较：两边 trim 后，能转数字就按数值比较，否则按字符串
+            auto to_number = [](const std::string& s, double& out)->bool {
+                try {
+                    std::string t = trim_all(s);
+                    size_t pos = 0;
+                    out = std::stod(t, &pos);
+                    while (pos < t.size() && isspace((unsigned char)t[pos])) ++pos;
+                    return pos == t.size();
+                }
+                catch (...) { return false; }
+                };
+
+            auto cmp_helper = [&](const std::string& cell)->int {
+                std::string L = trim_all(cell);
+                std::string R = trim_all(rval);
+                double a = 0, b = 0; bool an = to_number(L, a), bn = to_number(R, b);
+                if (an && bn) {
+                    if (a < b) return -1;
+                    if (a > b) return  1;
+                    return 0;
+                }
+                if (L < R) return -1;
+                if (L > R) return  1;
+                return 0;
+                };
+
+            pred = [widx, cmp_op = cmp->op, cmp_helper](const std::vector<std::string>& row)->bool {
+                if (widx < 0 || widx >= (int)row.size()) return false;
+                const int c = cmp_helper(row[widx]);
+                switch (cmp_op) {
+                case minidb::CmpOp::EQ: return c == 0;
+                case minidb::CmpOp::NEQ: return c != 0;
+                case minidb::CmpOp::LT: return c < 0;
+                case minidb::CmpOp::LE: return c <= 0;
+                case minidb::CmpOp::GT: return c > 0;
+                case minidb::CmpOp::GE: return c >= 0;
+                default: return false;
+                }
+                };
+        }
+        else {
+            // 无 WHERE：全表命中
+            pred = nullptr; // StorageEngine::UpdateWhere 里会把 nullptr 视为“全部命中”
+        }
+
+        // 3) 交给存储层按谓词更新（全表扫描 + 覆写），完全绕开“手写 UPDATE 执行器”
+        if (!storage.UpdateWhere(root->table, pred, sets_by_idx)) {
+            std::cerr << "Update failed.\n";
+            return false;
+        }
+        std::cout << "[RecordManager] Update finished.\n";
+        return true;
+    }
+
     default:
         std::cerr << "Unsupported plan root.\n";
         return false;

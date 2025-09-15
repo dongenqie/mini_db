@@ -20,6 +20,7 @@ namespace minidb {
         DELETE_,    // 删除
         ERROR,       // 出错占位
         DROP,          // <== 新增
+        UPDATE,          // <== 新增
     };
 
     struct PlanNode {
@@ -48,6 +49,9 @@ namespace minidb {
         // === 新增：承接 DROP TABLE IF EXISTS 的标志 ===
         bool if_exists{ false };
 
+        // ===== 新增：UPDATE 要用到的赋值列表 =====
+        std::vector<std::pair<std::string, std::unique_ptr<Expr>>> update_sets;
+
         // ERROR
         std::string error_msg;
     };
@@ -67,6 +71,7 @@ namespace minidb {
         std::unique_ptr<PlanNode> plan_select(const SelectStmt* s);
         std::unique_ptr<PlanNode> plan_delete(const DeleteStmt* s);
         std::unique_ptr<PlanNode> plan_drop(const DropTableStmt* s);
+        std::unique_ptr<PlanNode> plan_update(const UpdateStmt* s);
 
         // 小工具
         static std::unique_ptr<PlanNode> make_error(std::string msg);

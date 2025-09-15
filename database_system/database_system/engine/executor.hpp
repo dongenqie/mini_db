@@ -64,5 +64,21 @@ public:
     // 同时新增一个切库后的重绑定：
     bool RebindToCurrentDatabase(); // 根据 current_db 重新绑定 Catalog/Storage
 
+    // engine/executor.hpp  （在 public 区域追加声明）
+    bool ExecuteUpdate(
+        const std::string& tableName,
+        const std::vector<std::pair<std::string, std::string>>& sets,
+        // where 三种形式：EQ / IN / BETWEEN（简化仅对单列）
+        const std::string& whereCol,
+        const std::vector<std::string>& whereInVals,
+        const std::pair<std::string, std::string>& whereBetween, // [lo, hi]
+        const std::string& whereEqVal,                          // 若启用 EQ
+        int whereMode /*0=NONE,1=EQ,2=IN,3=BETWEEN*/);
+
+    bool ExecuteTruncate(const std::string& tableName);
+
+
     void ExecuteShowTables();
+
+
 };

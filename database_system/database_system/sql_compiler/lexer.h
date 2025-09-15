@@ -64,7 +64,6 @@ namespace minidb {
     class Lexer {
     public:
         // ---------- 供语法跟踪快照使用的保存/恢复 ----------
-        // === 新增：保存/恢复词法状态（包含 lookahead 缓存） ===
         struct State {
             size_t i;
             int line;
@@ -102,7 +101,11 @@ namespace minidb {
         std::optional<Token> try_comment();  // 识别注释；若 keep=true 则返回 COMMENT Token
         Token ident_or_kw();
         Token number();
-        Token string();
+
+        Token string();                 // 旧的，保留：解析单引号
+        Token string_with(char quote);  // 新增：支持任意引号（单/双）
+        // 统一的引号字符串解析（支持 '...' 与 "..."）
+        Token quoted_string(char quote_char);
         Token make_simple(TokenType t, const char* lx, int sl, int sc, LexCategory cat);
 
         // 游标

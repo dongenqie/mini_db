@@ -28,6 +28,21 @@ namespace minidb {
         }
     }
 
+    static const char* DtName(minidb::DataType dt) {
+        using minidb::DataType;
+        switch (dt) {
+        case DataType::INT32:     return "INT";
+        case DataType::TINYINT:   return "TINYINT";
+        case DataType::FLOAT:     return "FLOAT";
+        case DataType::CHAR:      return "CHAR";
+        case DataType::VARCHAR:   return "VARCHAR";
+        case DataType::DECIMAL:   return "DECIMAL";
+        case DataType::TIMESTAMP: return "TIMESTAMP";
+        default:                  return "VARCHAR";
+        }
+    }
+
+
     // 打印四元式 [种别码, "词素", 行, 列]
     void PrintTokenQuads(const std::string& sql, int start_line, std::ostream& os) {
         // 你的 Lexer 支持 (sql, start_line) 构造
@@ -131,8 +146,7 @@ namespace minidb {
             os << "(create-table " << Quote(ct->def.name) << " (";
             for (size_t i = 0; i < ct->def.columns.size(); ++i) {
                 const auto& c = ct->def.columns[i];
-                os << "(" << Quote(c.name) << " "
-                    << (c.type == DataType::INT32 ? "INT" : "VARCHAR") << ")";
+                os << "(" << Quote(c.name) << " " << DtName(c.type) << ")";
                 if (i + 1 < ct->def.columns.size()) os << " ";
             }
             os << "))";
@@ -167,6 +181,16 @@ namespace minidb {
         else if (auto del = dynamic_cast<const DeleteStmt*>(s)) {
             os << "(delete (from " << Quote(del->table) << ")";
             if (del->where) os << " (where " << ExprSexpr(del->where.get()) << ")";
+            os << ")";
+        }
+        else if (auto up = dynamic_cast<const UpdateStmt*>(s)) {
+            os << "(update " << Quote(up->table) << " (set ";
+            for (size_t i = 0; i < up->sets.size(); ++i) {
+                os << "(" << Quote(up->sets[i].first) << " " << ExprSexpr(up->sets[i].second.get()) << ")";
+                if (i + 1 < up->sets.size()) os << " ";
+            }
+            os << ")";
+            if (up->where) os << " (where " << ExprSexpr(up->where.get()) << ")";
             os << ")";
         }
         else {
@@ -218,6 +242,7 @@ namespace minidb {
         case PlanOp::PROJECT: return "Project";
         case PlanOp::DELETE_: return "Delete";
         case PlanOp::DROP:    return "Drop";
+        case PlanOp::UPDATE:  return "Update";
         default:              return "Error";
         }
     }
@@ -232,7 +257,7 @@ namespace minidb {
             os << ", \"create\": { \"name\": \"" << n->create_def.name << "\", \"cols\": [";
             for (size_t i = 0; i < n->create_def.columns.size(); ++i) {
                 auto& c = n->create_def.columns[i];
-                os << "{ \"name\": \"" << c.name << "\", \"type\": \"" << (c.type == DataType::INT32 ? "INT" : "VARCHAR") << "\" }";
+                os << "{ \"name\": \"" << c.name << "\", \"type\": \"" << DtName(c.type) << "\" }";
                 if (i + 1 < n->create_def.columns.size()) os << ", ";
             }
             os << "] }";
@@ -285,6 +310,23 @@ namespace minidb {
         case PlanOp::DROP:
             os << ", \"table\": \"" << n->table << "\"";
             break;
+        case PlanOp::UPDATE:
+            os << ", \"table\": \"" << n->table << "\"";
+            // sets
+            os << ", \"sets\": [";
+            for (size_t i = 0; i < n->update_sets.size(); ++i) {
+                const auto& kv = n->update_sets[i];
+                os << "{ \"col\": \"" << kv.first << "\", \"val\": ";
+                if (auto ii = dynamic_cast<IntLit*>(kv.second.get()))       os << ii->v;
+                else if (auto ss = dynamic_cast<StrLit*>(kv.second.get()))  os << '\"' << JsonEscape(ss->v) << '\"';
+                else if (auto cc = dynamic_cast<ColRef*>(kv.second.get()))  os << '\"' << JsonEscape(cc->name) << '\"';
+                else os << "\"expr\"";
+                os << " }";
+                if (i + 1 < n->update_sets.size()) os << ", ";
+            }
+            os << "]";
+            if (n->predicate) os << ", \"filter\": \"(predicate)\"";
+            break;
         }
 
         if (!n->children.empty()) {
@@ -306,7 +348,7 @@ namespace minidb {
             os << " \"" << n->create_def.name << "\" (";
             for (size_t i = 0; i < n->create_def.columns.size(); ++i) {
                 auto& c = n->create_def.columns[i];
-                os << "(" << c.name << " " << (c.type == DataType::INT32 ? "INT" : "VARCHAR") << ")";
+                os << "(" << c.name << " " << DtName(c.type) << ")";
                 if (i + 1 < n->create_def.columns.size()) os << " ";
             }
             os << ")";
@@ -344,6 +386,21 @@ namespace minidb {
             break;
         case PlanOp::DROP:
             os << " \"" << n->table << "\"";
+            break;
+        case PlanOp::UPDATE:
+            os << " \"" << n->table << "\" (";
+            for (size_t i = 0; i < n->update_sets.size(); ++i) {
+                const auto& kv = n->update_sets[i];
+                os << "(" << kv.first << " ";
+                if (auto ii = dynamic_cast<IntLit*>(kv.second.get()))       os << ii->v;
+                else if (auto ss = dynamic_cast<StrLit*>(kv.second.get()))  os << "\"" << ss->v << "\"";
+                else if (auto cc = dynamic_cast<ColRef*>(kv.second.get()))  os << cc->name;
+                else os << "expr";
+                os << ")";
+                if (i + 1 < n->update_sets.size()) os << " ";
+            }
+            os << ")";
+            if (n->predicate) os << " (predicate)";
             break;
         case PlanOp::ERROR:
             os << " \"ERROR: " << n->error_msg << "\"";

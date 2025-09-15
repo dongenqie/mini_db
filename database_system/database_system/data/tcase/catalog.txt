@@ -1,0 +1,1 @@
+user|user.tbl|1|1|7|id:INT|name:VARCHAR(50)|user_email:VARCHAR(100)|age:VARCHAR(0)|fee:FLOAT|createTime:VARCHAR(0)|password:VARCHAR(0)

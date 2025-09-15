@@ -7,6 +7,7 @@
 #include "catalog_manager.hpp"
 #include "../storage/file_manager.hpp"
 #include "../storage/page.hpp"
+#include <functional> 
 
 class StorageEngine {
 public:
@@ -28,6 +29,21 @@ public:
 
     // 物理丢弃：释放该表所有页（仅演示，简单回收到 free list）
     bool DropTableData(const std::string& tableName);
+
+    // 条件更新：将满足 where 条件的记录按 sets 更新
+    //  whereColIndex: 参与条件的列索引；若是 IN/BETWEEN，请传 -2 并依赖谓词回调
+    //  返回 true 表示成功
+    bool UpdateWhere(
+        const std::string& tableName,
+        const std::function<bool(const std::vector<std::string>&)>& pred,
+        const std::vector<std::pair<int, std::string>>& sets_by_idx);
+
+    bool OverwriteAll(
+        const std::string& tableName,
+        const std::vector<std::vector<std::string>>& rows);
+
+    // TRUNCATE：清空表数据并重建空页链（不删除表定义）
+    bool TruncateTable(const std::string& tableName);
 
 private:
     // --- 工具 ---

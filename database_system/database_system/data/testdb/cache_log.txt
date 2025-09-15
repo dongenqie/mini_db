@@ -237,3 +237,337 @@
 [2025-09-15 17:12:44] CacheManager initialized: capacity=64, policy=LRU
 [2025-09-15 17:13:02] Cache miss: page 2 read from disk
 [2025-09-15 17:13:02] Cache add: page 2 added to cache
+[2025-09-15 21:27:13] CacheManager initialized: capacity=64, policy=LRU
+[2025-09-15 21:29:37] Cache miss: page 1 read from disk
+[2025-09-15 21:29:37] Cache add: page 1 added to cache
+[2025-09-15 21:29:37] Cache hit: page 1
+[2025-09-15 21:29:37] Cache hit: page 1
+[2025-09-15 21:29:37] Flush page success: page 1 flushed to disk
+[2025-09-15 21:29:37] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:29:44] Cache hit: page 1
+[2025-09-15 21:30:18] Cache hit: page 1
+[2025-09-15 21:30:18] Cache hit: page 1
+[2025-09-15 21:30:18] Cache hit: page 1
+[2025-09-15 21:30:18] Flush page success: page 1 flushed to disk
+[2025-09-15 21:30:18] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:30:24] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page success: page 1 flushed to disk
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page success: page 1 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page success: page 1 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page success: page 1 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:31:06] Cache miss: page 2 read from disk
+[2025-09-15 21:31:06] Cache add: page 2 added to cache
+[2025-09-15 21:31:06] Flush page success: page 2 flushed to disk
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Flush page success: page 2 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Flush page success: page 2 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Flush page success: page 2 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Cache hit: page 2
+[2025-09-15 21:31:06] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page success: page 1 flushed to disk
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page success: page 1 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page success: page 1 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Cache hit: page 1
+[2025-09-15 21:31:06] Flush page success: page 1 flushed to disk
+[2025-09-15 21:31:06] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:31:27] Cache hit: page 1
+[2025-09-15 21:32:17] Cache hit: page 1
+[2025-09-15 21:32:17] Cache hit: page 1
+[2025-09-15 21:32:17] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Flush page success: page 2 flushed to disk
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Flush page success: page 2 flushed to disk
+[2025-09-15 21:32:17] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Flush page success: page 2 flushed to disk
+[2025-09-15 21:32:17] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Cache hit: page 2
+[2025-09-15 21:32:17] Flush page success: page 2 flushed to disk
+[2025-09-15 21:32:17] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:32:23] Cache hit: page 2
+[2025-09-15 21:33:21] Cache hit: page 2
+[2025-09-15 21:33:21] Cache hit: page 2
+[2025-09-15 21:33:21] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Flush page success: page 1 flushed to disk
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Flush page success: page 1 flushed to disk
+[2025-09-15 21:33:21] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Flush page success: page 1 flushed to disk
+[2025-09-15 21:33:21] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Cache hit: page 1
+[2025-09-15 21:33:21] Flush page success: page 1 flushed to disk
+[2025-09-15 21:33:21] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:33:39] Cache hit: page 1
+[2025-09-15 21:34:14] Cache hit: page 1
+[2025-09-15 21:34:14] Cache hit: page 1
+[2025-09-15 21:34:14] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Flush page success: page 2 flushed to disk
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Flush page success: page 2 flushed to disk
+[2025-09-15 21:34:14] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Flush page success: page 2 flushed to disk
+[2025-09-15 21:34:14] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Cache hit: page 2
+[2025-09-15 21:34:14] Flush page success: page 2 flushed to disk
+[2025-09-15 21:34:14] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:34:20] Cache hit: page 2
+[2025-09-15 21:35:18] Cache hit: page 2
+[2025-09-15 21:35:18] Cache hit: page 2
+[2025-09-15 21:35:18] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Flush page success: page 1 flushed to disk
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Flush page success: page 1 flushed to disk
+[2025-09-15 21:35:18] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Flush page success: page 1 flushed to disk
+[2025-09-15 21:35:18] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Cache hit: page 1
+[2025-09-15 21:35:18] Flush page success: page 1 flushed to disk
+[2025-09-15 21:35:18] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:35:24] Cache hit: page 1
+[2025-09-15 21:36:11] Cache hit: page 1
+[2025-09-15 21:36:11] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:36:11] Cache hit: page 2
+[2025-09-15 21:36:11] Flush page success: page 2 flushed to disk
+[2025-09-15 21:36:11] Cache hit: page 2
+[2025-09-15 21:36:11] Cache hit: page 2
+[2025-09-15 21:36:11] Flush page success: page 2 flushed to disk
+[2025-09-15 21:36:11] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:36:11] Cache hit: page 2
+[2025-09-15 21:36:11] Cache hit: page 2
+[2025-09-15 21:36:11] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:36:11] Cache hit: page 1
+[2025-09-15 21:36:11] Flush page success: page 1 flushed to disk
+[2025-09-15 21:36:11] Cache hit: page 1
+[2025-09-15 21:36:11] Cache hit: page 1
+[2025-09-15 21:36:11] Flush page success: page 1 flushed to disk
+[2025-09-15 21:36:11] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:36:26] Cache hit: page 1
+[2025-09-15 21:36:44] Cache hit: page 1
+[2025-09-15 21:36:44] Cache hit: page 1
+[2025-09-15 21:36:44] Cache hit: page 1
+[2025-09-15 21:36:44] Flush page success: page 1 flushed to disk
+[2025-09-15 21:36:44] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:36:52] Cache hit: page 1
+[2025-09-15 21:36:52] Cache hit: page 1
+[2025-09-15 21:36:52] Cache hit: page 1
+[2025-09-15 21:36:52] Flush page success: page 1 flushed to disk
+[2025-09-15 21:36:52] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:36:58] Cache hit: page 1
+[2025-09-15 21:37:17] Cache hit: page 1
+[2025-09-15 21:37:17] Cache hit: page 1
+[2025-09-15 21:37:17] Flush page skipped: page 1 is not dirty
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Flush page success: page 2 flushed to disk
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Flush page success: page 2 flushed to disk
+[2025-09-15 21:37:17] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Flush page success: page 2 flushed to disk
+[2025-09-15 21:37:17] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Cache hit: page 2
+[2025-09-15 21:37:17] Flush page success: page 2 flushed to disk
+[2025-09-15 21:37:17] Flush page skipped: page 2 is not dirty
+[2025-09-15 21:37:22] Cache hit: page 2
+[2025-09-16 00:13:54] CacheManager initialized: capacity=64, policy=LRU
+[2025-09-16 00:16:44] Cache miss: page 2 read from disk
+[2025-09-16 00:16:44] Cache add: page 2 added to cache
+[2025-09-16 00:17:04] Cache hit: page 2
+[2025-09-16 00:17:04] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:17:04] Cache miss: page 1 read from disk
+[2025-09-16 00:17:04] Cache add: page 1 added to cache
+[2025-09-16 00:17:04] Flush page success: page 1 flushed to disk
+[2025-09-16 00:17:04] Cache hit: page 1
+[2025-09-16 00:17:04] Cache hit: page 1
+[2025-09-16 00:17:04] Flush page success: page 1 flushed to disk
+[2025-09-16 00:17:04] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:17:16] Cache hit: page 1
+[2025-09-16 00:17:42] Cache hit: page 1
+[2025-09-16 00:17:42] Cache hit: page 1
+[2025-09-16 00:17:42] Cache hit: page 1
+[2025-09-16 00:17:42] Flush page success: page 1 flushed to disk
+[2025-09-16 00:17:42] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:17:49] Cache hit: page 1
+[2025-09-16 00:17:56] Cache hit: page 1
+[2025-09-16 00:17:56] Cache hit: page 1
+[2025-09-16 00:17:56] Cache hit: page 1
+[2025-09-16 00:17:56] Flush page success: page 1 flushed to disk
+[2025-09-16 00:17:56] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:18:02] Cache hit: page 1
+[2025-09-16 00:18:21] Cache hit: page 1
+[2025-09-16 00:18:21] Cache hit: page 1
+[2025-09-16 00:18:21] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:18:21] Cache hit: page 2
+[2025-09-16 00:18:21] Flush page success: page 2 flushed to disk
+[2025-09-16 00:18:21] Cache hit: page 2
+[2025-09-16 00:18:21] Cache hit: page 2
+[2025-09-16 00:18:21] Flush page success: page 2 flushed to disk
+[2025-09-16 00:18:21] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:18:22] Cache hit: page 2
+[2025-09-16 00:18:22] Cache hit: page 2
+[2025-09-16 00:18:22] Cache hit: page 2
+[2025-09-16 00:18:22] Flush page success: page 2 flushed to disk
+[2025-09-16 00:18:22] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:18:22] Cache hit: page 2
+[2025-09-16 00:18:22] Cache hit: page 2
+[2025-09-16 00:18:22] Cache hit: page 2
+[2025-09-16 00:18:22] Flush page success: page 2 flushed to disk
+[2025-09-16 00:18:22] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:18:30] Cache hit: page 2
+[2025-09-16 00:18:58] Cache hit: page 2
+[2025-09-16 00:18:58] Cache hit: page 2
+[2025-09-16 00:18:58] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Flush page success: page 1 flushed to disk
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Flush page success: page 1 flushed to disk
+[2025-09-16 00:18:58] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Flush page success: page 1 flushed to disk
+[2025-09-16 00:18:58] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Cache hit: page 1
+[2025-09-16 00:18:58] Flush page success: page 1 flushed to disk
+[2025-09-16 00:18:58] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:19:06] Cache hit: page 1
+[2025-09-16 00:19:33] Cache hit: page 1
+[2025-09-16 00:20:14] Cache hit: page 1
+[2025-09-16 00:20:33] Cache hit: page 1
+[2025-09-16 00:20:33] Cache hit: page 1
+[2025-09-16 00:20:33] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Flush page success: page 2 flushed to disk
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Flush page success: page 2 flushed to disk
+[2025-09-16 00:20:33] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Flush page success: page 2 flushed to disk
+[2025-09-16 00:20:33] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Cache hit: page 2
+[2025-09-16 00:20:33] Flush page success: page 2 flushed to disk
+[2025-09-16 00:20:33] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:20:37] Cache hit: page 2
+[2025-09-16 00:20:50] Cache hit: page 2
+[2025-09-16 00:20:50] Cache hit: page 2
+[2025-09-16 00:20:50] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Flush page success: page 1 flushed to disk
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Flush page success: page 1 flushed to disk
+[2025-09-16 00:20:50] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Flush page success: page 1 flushed to disk
+[2025-09-16 00:20:50] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Cache hit: page 1
+[2025-09-16 00:20:50] Flush page success: page 1 flushed to disk
+[2025-09-16 00:20:50] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:20:57] Cache hit: page 1
+[2025-09-16 00:21:04] Cache hit: page 1
+[2025-09-16 00:21:04] Cache hit: page 1
+[2025-09-16 00:21:04] Flush page skipped: page 1 is not dirty
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Flush page success: page 2 flushed to disk
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Flush page success: page 2 flushed to disk
+[2025-09-16 00:21:04] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Flush page success: page 2 flushed to disk
+[2025-09-16 00:21:04] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Cache hit: page 2
+[2025-09-16 00:21:04] Flush page success: page 2 flushed to disk
+[2025-09-16 00:21:04] Flush page skipped: page 2 is not dirty
+[2025-09-16 00:21:09] Cache hit: page 2
+[2025-09-16 00:52:36] CacheManager initialized: capacity=64, policy=LRU
+[2025-09-16 00:53:01] Cache miss: page 2 read from disk
+[2025-09-16 00:53:01] Cache add: page 2 added to cache
+[2025-09-16 00:54:12] Flush all dirty pages start
+[2025-09-16 00:54:12] Flush all dirty pages end: success=0, failed=0

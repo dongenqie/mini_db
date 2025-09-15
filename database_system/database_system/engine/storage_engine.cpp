@@ -6,6 +6,9 @@
 #include <iostream>
 #include <cstring>
 #include <cctype>
+#include <functional> 
+#include <fstream>
+#include <algorithm>
 
 static constexpr uint32_t HEADER = PAGE_HEADER_SIZE;    // 16
 static constexpr uint32_t PAGESZ = PAGE_SIZE;
@@ -288,4 +291,86 @@ bool StorageEngine::DropTableData(const std::string& tableName) {
     if (!cmgr_.UpdateTablePages(catalog_, tableName, 0, 0)) return false;
     cmgr_.SaveCatalog(catalog_);
     return true;
+}
+
+// engine/storage_engine.cpp  （追加实现）
+
+bool StorageEngine::UpdateWhere(
+    const std::string& tableName,
+    const std::function<bool(const std::vector<std::string>&)>& pred,
+    const std::vector<std::pair<int, std::string>>& sets_by_idx)
+{
+    // 1) 拉全表
+    auto rows = SelectAll(tableName);
+    if (rows.empty() && !/*允许空表*/true) return true;
+
+    // 2) 对命中行应用修改
+    size_t changed = 0;
+    for (auto& r : rows) {
+        if (!pred || pred(r)) {
+            for (const auto& kv : sets_by_idx) {
+                const int idx = kv.first;
+                if (idx >= 0) {
+                    if ((size_t)idx >= r.size()) r.resize(idx + 1);
+                    r[idx] = kv.second;
+                }
+            }
+            ++changed;
+        }
+    }
+
+    // 3) 整表覆写
+    if (!OverwriteAll(tableName, rows)) {
+        std::cerr << "StorageEngine::UpdateWhere: overwrite failed\n";
+        return false;
+    }
+
+    // 可选：打印命中行数
+    // std::cout << "[RecordManager] Update matched " << changed << " rows.\n";
+    return true;
+}
+
+bool StorageEngine::OverwriteAll(
+    const std::string& tableName,
+    const std::vector<std::vector<std::string>>& rows)
+{
+    // 1) 清空表所有数据页并把目录清零
+    if (!DropTableData(tableName)) {
+        std::cerr << "OverwriteAll: DropTableData failed\n";
+        return false;
+    }
+    // 2) 重建一个空页链，保证后续 Insert 可用
+    if (!InitTablePages(tableName)) {
+        std::cerr << "OverwriteAll: InitTablePages failed\n";
+        return false;
+    }
+    // 3) 按行重写
+    for (const auto& r : rows) {
+        if (!Insert(tableName, r)) {
+            std::cerr << "OverwriteAll: Insert failed on a row\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+
+bool StorageEngine::TruncateTable(const std::string& tableName) {
+    TableInfo* t = catalog_.GetTable(tableName);
+    if (!t) return true; // 视为成功
+
+    // 释放链页并清零目录
+    uint32_t pid = t->first_pid;
+    while (pid != INVALID_PAGE_ID && pid != 0) {
+        Page* p = fm_.read_page(pid);
+        if (!p) break;
+        uint32_t next = p->get_next_page_id();
+        fm_.free_page(pid);
+        pid = next;
+    }
+    if (!cmgr_.UpdateTablePages(catalog_, tableName, 0, 0)) return false;
+    cmgr_.SaveCatalog(catalog_);
+
+    // 重新建一个空页链
+    return InitTablePages(tableName);
 }

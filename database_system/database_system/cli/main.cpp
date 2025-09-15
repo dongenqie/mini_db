@@ -1,7 +1,6 @@
 // =============================================
 // cli/main.cpp  —
 // =============================================
-// cli/main.cpp
 #include <iostream>
 #include <string>
 #include <algorithm>
@@ -125,6 +124,7 @@ int main() {
                                                            /*cache*/64, ReplacePolicy::LRU);
         storage = std::make_unique<StorageEngine>(cmgr, catalog, *fm);
         exec = std::make_unique<Executor>(cmgr, catalog, *storage);
+        exec->SetDatabase(db);
 
         current_db = db;
         std::cout << "Database changed to " << current_db << ".\n";
@@ -223,7 +223,6 @@ int main() {
             }
             // SHOW TABLES; / DESC ... / SHOW CREATE TABLE ... / ALTER TABLE ...
             // 这些目前 parser/planner 尚未实现，统一走“手写执行器”
-
         }
 
         // —— 聚合多行 SQL，直到遇到 ';' 再送入编译器 ——
@@ -239,54 +238,46 @@ int main() {
             return head == "INSERT";
         };
 
-        // 单条语句执行器：先走手写（DDL/兼容语法），不接手再走编译器（INSERT/SELECT/DELETE等）
-        auto process_one_stmt = [&](const std::string& one_stmt)->bool {
-            bool handled = false;
-            bool ok = false;
+        // 单条语句执行器：统一走编译器（Lexer→Parser→Semantic→Planner→Executor）
+        auto process_one_stmt_compiler = [&](const std::string& one_stmt)->bool {
+            Status st = Status::OK();
+            Lexer lx(one_stmt);
+            Parser ps(lx);
+            auto stmt = ps.parse_statement(st);
 
-            if (exec) {
-                handled = true;
-                ok = exec->Execute(one_stmt);   // 手写执行器尝试
-                if (!ok) {
-                    // 手写没成功 -> 尝试走编译器
-                    handled = false;
-                }
+            if (!st.ok || !stmt) {
+                std::cerr << "Syntax error: " << st.message << "\n";
+                return false;
             }
 
-            if (!handled) {
-                Status st = Status::OK();
-                Lexer lx(one_stmt);
-                Parser ps(lx);
-                auto stmt = ps.parse_statement(st);
-
-                if (!st.ok || !stmt) {
-                    std::cerr << "Syntax error: " << st.message << "\n";
-                    ok = false;
-                }
-                else {
-                    CatalogEngineAdapter icat(cmgr, catalog);
-                    SemanticAnalyzer sem(icat);
-                    auto sres = sem.analyze(stmt.get());
-                    if (!sres.status.ok) {
-                        std::cerr << "Semantic error: " << sres.status.message << "\n";
-                        ok = false;
-                    }
-                    else {
-                        Planner pl;
-                        Plan plan = pl.plan_from_stmt(stmt.get());
-                        ok = (exec && exec->ExecutePlan(plan));
-                        if (!ok) std::cerr << "Execution failed.\n";
-                    }
-                }
+            CatalogEngineAdapter icat(cmgr, catalog);
+            SemanticAnalyzer sem(icat);
+            auto sres = sem.analyze(stmt.get());
+            if (!sres.status.ok) {
+                std::cerr << "Semantic error: " << sres.status.message << "\n";
+                return false;
             }
 
-            // 每条语句都持久化一次目录
-            cmgr.SaveCatalog(catalog);
+            Planner pl;
+            Plan plan = pl.plan_from_stmt(stmt.get());
+            bool ok = (exec && exec->ExecutePlan(plan));
+            if (!ok) std::cerr << "Execution failed.\n";
             return ok;
             };
 
-        // 把缓冲区中的多条语句逐条切出来执行（按第一个 ';' 循环）
-        int inserted_in_batch = 0;
+        // 小工具：取首关键字（忽略前导空白）
+        auto head_kw = [](const std::string& s)->std::string {
+        size_t i = 0;
+        while (i < s.size() && isspace((unsigned char)s[i])) ++i;
+        std::string kw;
+        while (i < s.size() && std::isalpha((unsigned char)s[i])) {
+            kw.push_back((char)std::toupper((unsigned char)s[i]));
+            ++i;
+                
+        }
+            return kw;
+        };
+        int inserted_in_batch = 0;  // 用来复刻你原来的 “N rows inserted.” 输出
         while (true) {
             size_t pos = sql.find(';');
             if (pos == std::string::npos) break;
@@ -299,9 +290,26 @@ int main() {
             if (one_no_semi.empty()) continue;
 
             const std::string one_stmt = one_no_semi + ";";
-            const bool is_ins = is_insert_stmt(one_stmt);
-            bool ok = process_one_stmt(one_stmt);
-            if (ok && is_ins) ++inserted_in_batch;
+            const std::string kw = head_kw(one_stmt);
+            
+            bool ok = false;
+            if (kw == "UPDATE") {
+                // 先尝试“手写执行器”版本（支持 IN/BETWEEN/AND 等），
+                // 如失败，再回退到编译器/Planner 路径（以便未来你完善编译器后仍可用）
+                if (!exec) { std::cerr << "Executor not ready.\n"; ok = false; }
+                else        ok = exec->Execute(one_stmt);
+
+                if (!ok) {
+                    // 回退到编译器链路
+                    ok = process_one_stmt_compiler(one_stmt);
+                }
+            }
+            else {
+                // 其余语句全部走你原先的“手写执行器”，保持既有功能不变
+                if (!exec) { std::cerr << "Executor not ready.\n"; ok = false; }
+                else        ok = exec->Execute(one_stmt);
+            }
+            if (ok && kw == "INSERT") ++inserted_in_batch;
         }
 
         // 若本批次有 INSERT，汇总输出

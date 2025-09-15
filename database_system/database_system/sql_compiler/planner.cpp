@@ -133,6 +133,47 @@ namespace minidb {
         return n;
     }
 
+    // UPDATE
+    std::unique_ptr<PlanNode> Planner::plan_update(const UpdateStmt* s) {
+        if (!s) return make_error("null UpdateStmt");
+        auto n = std::make_unique<PlanNode>();
+        n->op = PlanOp::UPDATE;
+        n->table = s->table;
+
+        // 复制 SET 列表（仅支持 ColRef/IntLit/StrLit）
+        for (const auto& kv : s->sets) {
+            const auto& col = kv.first;
+            const Expr* e = kv.second.get();
+            std::unique_ptr<Expr> val;
+            if (auto ii = dynamic_cast<const IntLit*>(e))      val = std::make_unique<IntLit>(ii->v);
+            else if (auto ss = dynamic_cast<const StrLit*>(e)) val = std::make_unique<StrLit>(ss->v);
+            else if (auto cc = dynamic_cast<const ColRef*>(e)) val = std::make_unique<ColRef>(cc->name);
+            else return make_error("UPDATE value expr not supported in planner");
+            n->update_sets.emplace_back(col, std::move(val));
+        }
+
+        // WHERE（仅支持简单比较 CmpExpr 左列右字面量）
+        if (s->where) {
+            if (auto c = dynamic_cast<CmpExpr*>(s->where.get())) {
+                auto clone_side = [](const Expr* e)->std::unique_ptr<Expr> {
+                    if (auto x = dynamic_cast<const ColRef*>(e)) return std::make_unique<ColRef>(x->name);
+                    if (auto x = dynamic_cast<const IntLit*>(e)) return std::make_unique<IntLit>(x->v);
+                    if (auto x = dynamic_cast<const StrLit*>(e)) return std::make_unique<StrLit>(x->v);
+                    return nullptr;
+                    };
+                auto L = clone_side(c->lhs.get());
+                auto R = clone_side(c->rhs.get());
+                if (!L || !R) return make_error("UPDATE WHERE expr not supported in planner");
+                n->predicate = std::make_unique<CmpExpr>(std::move(L), c->op, std::move(R));
+            }
+            else {
+                return make_error("UPDATE WHERE expr not supported in planner");
+            }
+        }
+        return n;
+    }
+
+
     // 入口
     Plan Planner::plan_from_stmt(Stmt* s) {
         Plan p;
@@ -141,6 +182,7 @@ namespace minidb {
         if (auto q = dynamic_cast<SelectStmt*>(s)) { p.root = plan_select(q); return p; }
         if (auto d = dynamic_cast<DeleteStmt*>(s)) { p.root = plan_delete(d); return p; }
         if (auto dr = dynamic_cast<DropTableStmt*>(s)) { p.root = plan_drop(dr);  return p; }
+        if (auto u = dynamic_cast<UpdateStmt*>(s)) { p.root = plan_update(u); return p; }
         p.root = make_error("Unsupported statement type in planner");
         return p;
     }
