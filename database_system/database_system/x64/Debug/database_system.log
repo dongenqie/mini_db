@@ -1,6 +1,2 @@
-﻿  main.cpp
-  catalog_manager.cpp
-  executor.cpp
-  storage_engine.cpp
-  正在生成代码...
+﻿  executor.cpp
   database_system.vcxproj -> D:\practical\database\database_system\x64\Debug\database_system.exe

@@ -17,6 +17,9 @@ namespace minidb {
         "LIMIT",
         // 新增（本次修复的关键）
         "DROP","IF","EXISTS",
+        // 在 KW 集合里补齐（如果还没加）：
+        "SHOW","USE","DATABASE","DATABASES","DESCRIBE", // DESC 已经有但在 ORDER 场景
+        "ALTER","RENAME","TO","CHAR","AFTER"
         // 类型
         "INT","VARCHAR",
         // 逻辑

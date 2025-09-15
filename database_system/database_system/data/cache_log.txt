@@ -291,3 +291,4 @@
 [2025-09-14 03:53:43] Cache hit: page 1
 [2025-09-14 03:53:43] Flush page success: page 1 flushed to disk
 [2025-09-14 03:53:43] Flush page skipped: page 1 is not dirty
+[2025-09-14 20:53:17] CacheManager initialized: capacity=64, policy=LRU

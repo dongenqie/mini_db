@@ -4,6 +4,9 @@
 // cli/main.cpp
 #include <iostream>
 #include <string>
+#include <algorithm>
+#include <filesystem>
+#include <sstream>
 
 #define MINIDB_IMPL_LEXER
 #define MINIDB_IMPL_PARSER
@@ -21,16 +24,57 @@
 #include "../sql_compiler/catalog_adapter_engine.h"
 
 #include "../engine/catalog_manager.hpp"
-//#include "../engine/storage_engine.hpp"
+#include "../engine/storage_engine.hpp"
 #include "../engine/executor.hpp"
 
 #include "../storage/file_manager.hpp"   // 新增
 #include "../storage/cache_manager.hpp"  // 用到 ReplacePolicy 枚举
-#include "../engine/storage_engine.hpp"
 
 using namespace minidb;
+namespace fs = std::filesystem;
 
-static void print_rows(const std::vector<Row>& rows, const TableDef* opt_td) {
+static inline std::string trim_copy(const std::string& s) {
+    size_t b = 0, e = s.size();
+    while (b < e && isspace((unsigned char)s[b])) ++b;
+    while (e > b && isspace((unsigned char)s[e - 1])) --e;
+    return s.substr(b, e - b);
+}
+
+static inline std::string upper_copy(std::string s) {
+    for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+    return s;
+}
+
+static inline bool ends_with_semicolon(const std::string& s) {
+    for (int i = (int)s.size() - 1; i >= 0; --i) {
+        if (!isspace((unsigned char)s[i])) return s[i] == ';';
+    }
+    return false;
+}
+
+// 列出 data/ 下所有“数据库目录”（包含 catalog.txt 或非空目录）
+static std::vector<std::string> list_databases(const std::string& root = "data") {
+    std::vector<std::string> out;
+    if (!fs::exists(root)) return out;
+    for (auto& de : fs::directory_iterator(root)) {
+        if (!de.is_directory()) continue;
+        auto db = de.path().filename().string();
+        // 至少有 catalog.txt 或者空目录也算库（你也可以限制必须有 catalog.txt）
+        out.push_back(db);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// 确保 data/<db>/ 目录存在
+static bool ensure_db_dir(const std::string& db) {
+    fs::path p = fs::path("data") / db;
+    std::error_code ec;
+    if (fs::exists(p, ec)) return true;
+    return fs::create_directories(p, ec);
+}
+
+static void print_rows(const std::vector<Row>& rows, const TableDef* /*opt_td*/) {
     if (rows.empty()) { std::cout << "(empty)\n"; return; }
     for (const auto& r : rows) {
         for (size_t i = 0; i < r.values.size(); ++i) {
@@ -43,68 +87,224 @@ static void print_rows(const std::vector<Row>& rows, const TableDef* opt_td) {
     }
 }
 
+// ---------- main ----------
 int main() {
     std::cout << "MiniDB CLI (type \\q to quit)\n";
+    if (!fs::exists("data")) {
+        fs::create_directories("data");
+        std::cout << "data已创建\n";
+    }
+    else {
+        std::cout << "data已存在\n";
+    }
 
-    // 1) 目录与目录持久化
-    CatalogManager cmgr("data/catalog.txt");
-    Catalog catalog;
-    cmgr.LoadCatalog(catalog);
+    // 当前库名（默认：无库；你也可以默认建一个 "default"）
+    std::string current_db;
 
-    // 2) 底层存储：构造 FileManager
-    FileManager fm(
-        "data",                 // 数据目录
-        /*cache_cap*/ 64,       // 缓存页容量
-        ReplacePolicy::LRU      // 或 FIFO
-    );
+    // 这几个对象要“可重建、可重新绑定”
+    CatalogManager cmgr("");   // 将在 bind_db 中重设路径
+    Catalog        catalog;
+    std::unique_ptr<FileManager>   fm;
+    std::unique_ptr<StorageEngine> storage;
+    std::unique_ptr<Executor>      exec;
 
-    // 关键修正：把 catalog 也传进去，使用已存在的有效构造函数
-    StorageEngine storage(cmgr, catalog, fm);
+    auto bind_db = [&](const std::string& db)->bool {
+        // 1) 确保 data/<db>/ 存在
+        if (!ensure_db_dir(db)) {
+            std::cerr << "ERROR: create dir data/" << db << " failed.\n";
+            return false;
+        }
 
-    Executor exec(cmgr, catalog, storage);
+        // 1) 重建 cmgr / catalog
+        cmgr = CatalogManager((fs::path("data") / db / "catalog.txt").string());
+        catalog = Catalog();
+        cmgr.LoadCatalog(catalog);
+        
+        // 2) 重建 FM / Storage / Executor，注意顺序与引用绑定
+        fm = std::make_unique<FileManager>((fs::path("data") / db).string(),
+                                                           /*cache*/64, ReplacePolicy::LRU);
+        storage = std::make_unique<StorageEngine>(cmgr, catalog, *fm);
+        exec = std::make_unique<Executor>(cmgr, catalog, *storage);
 
+        current_db = db;
+        std::cout << "Database changed to " << current_db << ".\n";
+        return true;
+        };
+
+    auto show_databases = [&]() {
+        auto dbs = list_databases();
+        std::cout << "+------------------+\n";
+        std::cout << "| Databases        |\n";
+        std::cout << "+------------------+\n";
+        for (auto& d : dbs) std::cout << "| " << d << "\n";
+        std::cout << "+------------------+\n";
+        };
+
+    auto create_database = [&](const std::string& db)->bool {
+        if (db.empty()) { std::cerr << "CREATE DATABASE: name required\n"; return false; }
+        fs::path p = fs::path("data") / db;
+        if (fs::exists(p)) { std::cerr << "Database already exists: " << db << "\n"; return false; }
+        if (!ensure_db_dir(db)) return false;
+        // 初始化一个空 catalog.txt（可选）
+        CatalogManager temp((p / "catalog.txt").string());
+        Catalog empty;
+        temp.SaveCatalog(empty);
+        std::cout << "Database '" << db << "' created.\n";
+        return true;
+        };
+
+    auto drop_database = [&](const std::string& db)->bool {
+        if (db.empty()) { std::cerr << "DROP DATABASE: name required\n"; return false; }
+        if (current_db == db) {
+            std::cerr << "Cannot drop the database in use: " << db << "\n";
+            return false;
+        }
+        fs::path p = fs::path("data") / db;
+        if (!fs::exists(p)) {
+            std::cerr << "Database does not exist: " << db << "\n";
+            return false;
+        }
+        std::error_code ec;
+        fs::remove_all(p, ec);
+        if (ec) { std::cerr << "Failed to drop database: " << ec.message() << "\n"; return false; }
+        std::cout << "Database '" << db << "' dropped.\n";
+        return true;
+        };
+
+    // 进入 REPL
     std::string line, sql;
     while (true) {
         std::cout << "minidb> ";
         if (!std::getline(std::cin, line)) break;
         if (line == "\\q" || line == "quit" || line == "exit") break;
 
-        sql += line + "\n";
-        if (line.find(';') == std::string::npos) continue; // 读到 ';' 再执行
+        // 单行即命令（末尾可以带 ;）
+        std::string raw = trim_copy(line);
+        if (raw.empty()) continue;
 
-        // 2) 词法 + 语法
+        // —— 先拦截多库相关命令（不走编译器）——
+        // 允许大小写混写；参数中分号可省
+        {
+            std::string up = upper_copy(raw);
+            // SHOW DATABASES;
+            if (up.rfind("SHOW DATABASES", 0) == 0) {
+                show_databases();
+                continue;
+            }
+            // CREATE DATABASE <name>;
+            if (up.rfind("CREATE DATABASE", 0) == 0) {
+                // 取库名
+                std::string db = trim_copy(raw.substr(std::string("CREATE DATABASE").size()));
+                if (!db.empty() && db.back() == ';') db.pop_back();
+                db = trim_copy(db);
+                create_database(db);
+                continue;
+            }
+            // DROP DATABASE <name>;
+            if (up.rfind("DROP DATABASE", 0) == 0) {
+                std::string db = trim_copy(raw.substr(std::string("DROP DATABASE").size()));
+                if (!db.empty() && db.back() == ';') db.pop_back();
+                db = trim_copy(db);
+                drop_database(db);
+                continue;
+            }
+            // USE <name>;
+            if (up.rfind("USE ", 0) == 0) {
+                std::string db = trim_copy(raw.substr(4));
+                if (!db.empty() && db.back() == ';') db.pop_back();
+                db = trim_copy(db);
+                if (!fs::exists(fs::path("data") / db)) {
+                    std::cerr << "Unknown database: " << db << "\n";
+                }
+                else {
+                    bind_db(db);
+                }
+                continue;
+            }
+            // SHOW TABLES; / DESC ... / SHOW CREATE TABLE ... / ALTER TABLE ...
+            // 这些目前 parser/planner 尚未实现，统一走“手写执行器”
+            if (up.rfind("SHOW TABLES", 0) == 0 ||
+                up.rfind("DESC ", 0) == 0 ||
+                up.rfind("DESCRIBE ", 0) == 0 ||
+                up.rfind("SHOW CREATE TABLE", 0) == 0 ||
+                up.rfind("ALTER TABLE", 0) == 0) {
+                if (exec) {
+                    std::string stmt = raw;
+                    if (!ends_with_semicolon(stmt)) stmt += ";";
+                    if (!exec->Execute(stmt)) std::cerr << "Execution failed.\n";
+                    cmgr.SaveCatalog(catalog);
+                }
+                continue;
+            }
+        }
+
+        // —— 聚合多行 SQL，直到遇到 ';' 再送入编译器 ——
+        sql += raw + "\n";
+        if (!ends_with_semicolon(sql)) continue;
+
+        // 词法 + 语法
         Status st = Status::OK();
         Lexer lx(sql);
         Parser ps(lx);
         auto stmt = ps.parse_statement(st);
+
+        // 哪些 plan.op 我们已在 ExecutePlan 里实现
+        auto op_supported_by_plan = [](const Plan& plan) -> bool {
+            if (!plan.root) return false;
+            using minidb::PlanOp;
+            switch (plan.root->op) {
+            case PlanOp::CREATE:
+            case PlanOp::INSERT:
+            case PlanOp::PROJECT:
+            case PlanOp::FILTER:
+            case PlanOp::SEQSCAN:
+            case PlanOp::DELETE_:
+            case PlanOp::DROP:
+                return true;
+            default:
+                return false;
+            }
+        };
+
+        bool ran = false;
         if (!st.ok || !stmt) {
-            std::cerr << "Syntax error: " << st.message << "\n";
-            sql.clear();
-            continue;
+            // 语法阶段就不认识 -> 回退手写执行器（可覆盖 CREATE/INSERT/SELECT/DELETE/DROP 以外的语句）
+            if (exec && !exec->Execute(sql)) std::cerr << "Execution failed.\n";
+            ran = true;
+        }
+        else {
+            // 语义
+            minidb::CatalogEngineAdapter icat(cmgr, catalog);
+            minidb::SemanticAnalyzer sem(icat);
+            auto sres = sem.analyze(stmt.get());
+            if (!sres.status.ok) {
+                // 语义不过 -> 回退
+                if (exec && !exec->Execute(sql)) std::cerr << "Execution failed.\n";
+                ran = true;
+            }
+            else {
+                // 计划
+                Planner pl;
+                Plan plan = pl.plan_from_stmt(stmt.get());
+                if (op_supported_by_plan(plan)) {
+                    // 我们支持的那些 op 走计划执行
+                    if (!exec || !exec->ExecutePlan(plan)) std::cerr << "Execution failed.\n";
+                    ran = true;
+                }
+                else {
+                    // 其它 op（如 SHOW/DESC/ALTER/USE）回退手写执行器
+                    if (exec && !exec->Execute(sql)) std::cerr << "Execution failed.\n";
+                    ran = true;
+                }
+            }
         }
 
-        // 2) 语义（关键：用编译器提供的适配层，而不是把 CatalogManager 直接塞进来）
-        minidb::CatalogEngineAdapter icat(cmgr, catalog);
-        minidb::SemanticAnalyzer sem(icat);
-        auto sres = sem.analyze(stmt.get());
-        if (!sres.status.ok) {
-            std::cerr << "Semantic error: " << sres.status.message << "\n";
-            sql.clear();
-            continue;
-        }
-
-        // 4) 计划
-        Planner pl;
-        Plan plan = pl.plan_from_stmt(stmt.get());
-
-        // 4) 执行（用你项目里的接口名）
-        if (!exec.ExecutePlan(plan)) {
-            std::cerr << "Execution failed.\n";
-        }
-
-        cmgr.SaveCatalog(catalog); // 持久化目录
+        // 落盘当前库的目录（不管走哪条路径）
+        cmgr.SaveCatalog(catalog);
         sql.clear();
+        continue;
     }
+
     return 0;
 }
 

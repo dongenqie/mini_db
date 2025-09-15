@@ -48,28 +48,104 @@ bool Executor::Execute(const std::string& sql) {
         std::string tmp, tableName;
         iss >> tmp >> tableName; // TABLE tableName
 
-        // Parse danh sách cột: (colName type [len], ...)
+        // Parse 列定义: (colName type [len], ...)
         char ch;
-        iss >> ch; // (
+        iss >> ch; // '('
         std::vector<Column> columns;
-        while (iss.peek() != ')' && iss.good()) {
-            std::string colName, typeStr;
-            int len = 0;
-            iss >> colName >> typeStr;
 
-            ColumnType type;
-            if (typeStr == "INT") type = ColumnType::INT;
-            else if (typeStr == "FLOAT") type = ColumnType::FLOAT;
-            else {
+        auto to_upper = [](std::string s) {
+            for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+            return s;
+            };
+
+        // 去掉 token 尾部常见的分隔符（, ) ;）
+        auto strip_trailing_punct = [](std::string& s) {
+            while (!s.empty()) {
+                char c = s.back();
+                if (c == ',' || c == ')' || c == ';') s.pop_back();
+                else break;
+            }
+            };
+
+        while (iss.good()) {
+            // 跳空白
+            while (iss.peek() == ' ' || iss.peek() == '\t' || iss.peek() == '\n' || iss.peek() == '\r') iss.get();
+            if (!iss.good()) break;
+            if (iss.peek() == ')') break;
+
+            std::string colName, typeTok;
+            if (!(iss >> colName >> typeTok)) break;
+
+            std::string typeTokRaw = typeTok;            // 保留原始
+            std::string typeTokUp = to_upper(typeTok);  // 可能包含 ",", ")"
+
+            ColumnType type = ColumnType::VARCHAR;
+            int len = 0;
+
+            // 优先识别 VARCHAR[ (len) ] 这三种写法：
+            //   VARCHAR(20) / VARCHAR (20) / VARCHAR 20
+            if (typeTokUp.rfind("VARCHAR", 0) == 0) {
                 type = ColumnType::VARCHAR;
-                iss >> len; // lấy độ dài
+
+                // 1) 在同一个 token 里带括号：VARCHAR(20) 或 VARCHAR(20),
+                auto lp = typeTokRaw.find('(');
+                if (lp != std::string::npos) {
+                    auto rp = typeTokRaw.find(')', lp + 1);
+                    if (rp != std::string::npos) {
+                        std::string num = typeTokRaw.substr(lp + 1, rp - lp - 1);
+                        try { len = std::stoi(num); }
+                        catch (...) { len = 0; }
+                        // 括号后若跟着逗号，会留在本 token 内，这里已经被我们解析掉了
+                    }
+                    else {
+                        // 非法括号配对，忽略长度
+                        len = 0;
+                    }
+                }
+                else {
+                    // 2) 没有括号：尝试 "VARCHAR ( 20 )"
+                    //    或兼容旧风格 "VARCHAR 20"
+                    // 看看下一个非空白是不是 '('
+                    while (iss.peek() == ' ' || iss.peek() == '\t') iss.get();
+                    if (iss.peek() == '(') {
+                        char c1, c2; int L = 0;
+                        iss >> c1 >> L >> c2; // 读 '(' 数字 ')'
+                        len = L;
+                    }
+                    else {
+                        // 兼容：VARCHAR 20
+                        int L = 0;
+                        std::streampos pos = iss.tellg();
+                        if (iss >> L) len = L; else { len = 0; iss.clear(); iss.seekg(pos); }
+                    }
+                }
+            }
+            else {
+                // 非 VARCHAR：去掉尾随的 , ) ; 再判别
+                strip_trailing_punct(typeTokUp);
+
+                if (typeTokUp == "INT") {
+                    type = ColumnType::INT;
+                }
+                else if (typeTokUp == "FLOAT") {
+                    type = ColumnType::FLOAT;
+                }
+                else {
+                    // 未知类型：兜底为 VARCHAR(0)
+                    type = ColumnType::VARCHAR;
+                    len = 0;
+                }
             }
 
             columns.emplace_back(colName, type, len);
 
-            if (iss.peek() == ',') iss.ignore();
+            // 吞掉分隔逗号（若还留在流里）
+            while (iss.peek() == ' ' || iss.peek() == '\t' || iss.peek() == '\n' || iss.peek() == '\r') iss.get();
+            if (iss.peek() == ',') { iss.get(); }
+            while (iss.peek() == ' ' || iss.peek() == '\t' || iss.peek() == '\n' || iss.peek() == '\r') iss.get();
         }
-        iss >> ch; // )
+        iss >> ch; // ')'
+
 
         return ExecuteCreateTable(tableName, columns, tableName + ".tbl");
     }
@@ -206,22 +282,33 @@ bool Executor::Execute(const std::string& sql) {
         return ExecuteDesc(tableName);
 }
     else if (command == "SHOW") {
+        auto UP = [](std::string s) { for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; };
+
         std::string kw1;
         if (!(iss >> kw1)) { std::cerr << "SHOW: expect keyword\n"; return false; }
+        kw1 = UP(trim_semicolon(kw1));  // 关键：大写 + 去分号
+
+        if (kw1 == "DATABASES") {
+            return ExecuteShowDatabases();
+        }
         if (kw1 == "TABLES") {
             ExecuteShowTables();
             return true;
         }
         if (kw1 == "CREATE") {
             std::string kw2, tname;
-            if (!(iss >> kw2) || kw2 != "TABLE") { std::cerr << "SHOW CREATE: expect TABLE\n"; return false; }
+            if (!(iss >> kw2)) { std::cerr << "SHOW CREATE: expect TABLE\n"; return false; }
+            kw2 = UP(trim_semicolon(kw2));
+            if (kw2 != "TABLE") { std::cerr << "SHOW CREATE: expect TABLE\n"; return false; }
             if (!(iss >> tname)) { std::cerr << "SHOW CREATE TABLE: expect table name\n"; return false; }
             tname = trim_semicolon(tname);
             return ExecuteShowCreate(tname);
         }
+
         std::cerr << "SHOW: unsupported form\n";
         return false;
-}
+        }
+
     else if (command == "ALTER") {
         auto up = [](std::string s) { for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; };
 
@@ -533,7 +620,6 @@ bool Executor::ExecuteAlterChange(const std::string& tableName, const std::strin
     return false;
 }
 
-
 // ==========================
 // SHOW TABLES
 // ==========================
@@ -542,6 +628,19 @@ void Executor::ExecuteShowTables() {
     for (const auto& tableName : catalog.ListTables()) {
         std::cout << " - " << tableName << "\n";
     }
+}
+
+// engine/executor.cpp（合适位置，和其他 ExecuteXxx 同级）
+bool Executor::ExecuteShowDatabases() {
+    namespace fs = std::filesystem;
+    fs::create_directories("data");
+    std::cout << "Databases:\n";
+    for (auto& entry : fs::directory_iterator("data")) {
+        if (entry.is_directory()) {
+            std::cout << " - " << entry.path().filename().string() << "\n";
+        }
+    }
+    return true;
 }
 
 namespace {

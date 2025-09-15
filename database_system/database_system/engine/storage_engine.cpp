@@ -108,7 +108,7 @@ bool StorageEngine::InitTablePages(const std::string& tableName) {
 
     // 目录更新 + 立刻持久化
     if (!cmgr_.UpdateTablePages(catalog_, tableName, pid, pid)) return false;
-    (void)cmgr_.PersistCatalog(catalog_);   // <=== 关键新增
+    (void)cmgr_.SaveCatalog(catalog_);   // ★ 改为 SaveCatalog
     // 回填到 catalog
     return cmgr_.UpdateTablePages(catalog_, tableName, pid, pid);
 }
@@ -165,7 +165,7 @@ bool StorageEngine::allocate_linked_page(uint32_t prev_pid, uint32_t& new_pid) {
 
 bool StorageEngine::Insert(const std::string& tableName, const std::vector<std::string>& values) {
     if (!ensure_table_ready(tableName)) return false;
-    TableInfo * t = catalog_.GetTable(tableName);
+    TableInfo* t = catalog_.GetTable(tableName);
     if (!t) return false;
 
     std::string payload = join_csv(values);
@@ -181,11 +181,11 @@ bool StorageEngine::Insert(const std::string& tableName, const std::vector<std::
 
         // 更新 catalog 的 last_pid，并立即持久化
         if (!cmgr_.UpdateTablePages(catalog_, tableName, t->first_pid, npid)) return false;
-        (void)cmgr_.PersistCatalog(catalog_);   // <=== 关键新增
+        (void)cmgr_.SaveCatalog(catalog_);   // ★ 改为 SaveCatalog
     }
     else {
-        // 写在当前最后页也更新一下（可选，但稳妥），以免 free_offset 变化时需要额外信息
-        (void)cmgr_.PersistCatalog(catalog_);   // <=== 保守起见每次插入都落盘目录
+        // 写在当前最后页也更新一下（可选，但稳妥）
+        (void)cmgr_.SaveCatalog(catalog_);   // ★ 改为 SaveCatalog
     }
     // 更新 catalog 的 last_pid 后……
     fm_.flush_page(t->last_pid); // 让交互式 SELECT 立即可见
@@ -270,22 +270,22 @@ bool StorageEngine::DeleteWhere(const std::string& tableName, int whereColIndex,
 
 
 bool StorageEngine::DropTableData(const std::string& tableName) {
-    // 最小实现：
-    //  - 这里先不做真正的“回收数据页”的工作（你的 Insert/Select/Delete 仍然正常）
-    //  - 只要在 Executor 里随后把 catalog 中的表项删除，表就对上层“不可见”
-    //  - 如果你维护了 first_pid / last_pid，可在此把它们重置为 0 后持久化（可选）
+    // 释放该表所有链页，并把目录中的 first/last 置 0
+    TableInfo* t = catalog_.GetTable(tableName);
+    if (!t) return true; // 视作成功
 
-    // 如果 StorageEngine 内部能拿到 Catalog（例如有成员 this->catalog），
-    // 你可以重置该表的页链头尾，再让 CatalogManager 保存：
-    //
-    //    if (auto* t = catalog.GetTable(tableName)) {
-    //        t->first_pid = 0;
-    //        t->last_pid  = 0;
-    //        catalogManager.SaveCatalog(catalog);
-    //    }
-    //
-    // 但由于你这里的成员命名我们不确定（之前的 fm_/cmgr_/catalog_ 编译不过），
-    // 先给出“空操作成功返回”，让 DROP 功能跑通；后续再完善数据页回收。
-    (void)tableName;
+    // 释放页链
+    uint32_t pid = t->first_pid;
+    while (pid != INVALID_PAGE_ID && pid != 0) {
+        Page* p = fm_.read_page(pid);
+        if (!p) break;
+        uint32_t next = p->get_next_page_id();
+        fm_.free_page(pid);
+        pid = next;
+    }
+
+    // 更新目录并持久化
+    if (!cmgr_.UpdateTablePages(catalog_, tableName, 0, 0)) return false;
+    cmgr_.SaveCatalog(catalog_);
     return true;
 }
