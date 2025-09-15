@@ -1,2 +1,4 @@
-﻿  executor.cpp
+﻿  main.cpp
+  executor.cpp
+  正在生成代码...
   database_system.vcxproj -> D:\practical\database\database_system\x64\Debug\database_system.exe

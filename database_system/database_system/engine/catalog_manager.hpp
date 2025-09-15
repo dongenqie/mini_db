@@ -10,16 +10,35 @@
 #include <filesystem>
 
 // 列类型
-enum class ColumnType { INT, FLOAT, VARCHAR };
+enum class ColumnType {
+    INT,
+    TINYINT,
+    FLOAT,          // 保留旧的
+    CHAR,
+    VARCHAR,
+    DECIMAL,
+    TIMESTAMP
+};
 
 struct Column {
     std::string name;
-    ColumnType  type;
-    int         length;     // VARCHAR 长度（INT/FLOAT 可设为 0）
-    bool        isPrimaryKey;
-    bool        isNotNull;
-    Column(const std::string& n, ColumnType t, int len = 0, bool pk = false, bool notNull = false)
-        : name(n), type(t), length(len), isPrimaryKey(pk), isNotNull(notNull) {}
+    ColumnType  type{ ColumnType::VARCHAR };
+    int         length{ 0 };        // CHAR/VARCHAR/INT(10) 的宽度（INT 宽度只是展示用）
+    int         scale{ 0 };         // DECIMAL(precision, scale) 的 scale；precision 用 length 存
+
+    // 约束/属性
+    bool        not_null{ false };
+    bool        unsigned_flag{ false };
+    bool        auto_increment{ false };
+    bool        primary_key{ false };     // 简化：单列主键；多列主键可另加 vector<string> 在 Schema 里
+
+    std::string default_value;     // 原样存字符串（未写即空）
+    std::string comment;           // 列注释
+
+    // 兼容你原来的构造
+    Column() = default;
+    Column(std::string n, ColumnType t, int len = 0, bool notNull = false, bool pk = false)
+        : name(std::move(n)), type(t), length(len), not_null(notNull), primary_key(pk) {}
 };
 
 class Schema {

@@ -17,13 +17,14 @@ namespace minidb {
         "LIMIT",
         // 新增（本次修复的关键）
         "DROP","IF","EXISTS",
+        // 类型
+        "INT","TINYINT","CHAR","VARCHAR","DECIMAL","TIMESTAMP","FLOAT",
         // 在 KW 集合里补齐（如果还没加）：
         "SHOW","USE","DATABASE","DATABASES","DESCRIBE", // DESC 已经有但在 ORDER 场景
         "ALTER","RENAME","TO","CHAR","AFTER"
-        // 类型
-        "INT","VARCHAR",
-        // 逻辑
-        "AND","OR","NOT"
+        // 逻辑 / 约束
+        "AND","OR","NOT","NULL","UNSIGNED","DEFAULT","COMMENT",
+        "PRIMARY","KEY","AUTO_INCREMENT",
     };
 
     bool is_keyword_upper(const std::string& up) { return KW.count(up) > 0; }

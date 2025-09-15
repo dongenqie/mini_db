@@ -223,85 +223,96 @@ int main() {
             }
             // SHOW TABLES; / DESC ... / SHOW CREATE TABLE ... / ALTER TABLE ...
             // 这些目前 parser/planner 尚未实现，统一走“手写执行器”
-            if (up.rfind("SHOW TABLES", 0) == 0 ||
-                up.rfind("DESC ", 0) == 0 ||
-                up.rfind("DESCRIBE ", 0) == 0 ||
-                up.rfind("SHOW CREATE TABLE", 0) == 0 ||
-                up.rfind("ALTER TABLE", 0) == 0) {
-                if (exec) {
-                    std::string stmt = raw;
-                    if (!ends_with_semicolon(stmt)) stmt += ";";
-                    if (!exec->Execute(stmt)) std::cerr << "Execution failed.\n";
-                    cmgr.SaveCatalog(catalog);
-                }
-                continue;
-            }
+
         }
 
         // —— 聚合多行 SQL，直到遇到 ';' 再送入编译器 ——
         sql += raw + "\n";
+        // 如果当前缓冲里还没有 ';'，继续读下一行
         if (!ends_with_semicolon(sql)) continue;
 
-        // 词法 + 语法
-        Status st = Status::OK();
-        Lexer lx(sql);
-        Parser ps(lx);
-        auto stmt = ps.parse_statement(st);
-
-        // 哪些 plan.op 我们已在 ExecutePlan 里实现
-        auto op_supported_by_plan = [](const Plan& plan) -> bool {
-            if (!plan.root) return false;
-            using minidb::PlanOp;
-            switch (plan.root->op) {
-            case PlanOp::CREATE:
-            case PlanOp::INSERT:
-            case PlanOp::PROJECT:
-            case PlanOp::FILTER:
-            case PlanOp::SEQSCAN:
-            case PlanOp::DELETE_:
-            case PlanOp::DROP:
-                return true;
-            default:
-                return false;
-            }
+        // 小工具：判断是否 INSERT
+        auto is_insert_stmt = [](const std::string& s)->bool {
+            size_t i = 0; while (i < s.size() && isspace((unsigned char)s[i])) ++i;
+            std::string head;
+            while (i < s.size() && isalpha((unsigned char)s[i])) head.push_back((char)toupper((unsigned char)s[i++]));
+            return head == "INSERT";
         };
 
-        bool ran = false;
-        if (!st.ok || !stmt) {
-            // 语法阶段就不认识 -> 回退手写执行器（可覆盖 CREATE/INSERT/SELECT/DELETE/DROP 以外的语句）
-            if (exec && !exec->Execute(sql)) std::cerr << "Execution failed.\n";
-            ran = true;
-        }
-        else {
-            // 语义
-            minidb::CatalogEngineAdapter icat(cmgr, catalog);
-            minidb::SemanticAnalyzer sem(icat);
-            auto sres = sem.analyze(stmt.get());
-            if (!sres.status.ok) {
-                // 语义不过 -> 回退
-                if (exec && !exec->Execute(sql)) std::cerr << "Execution failed.\n";
-                ran = true;
+        // 单条语句执行器：先走手写（DDL/兼容语法），不接手再走编译器（INSERT/SELECT/DELETE等）
+        auto process_one_stmt = [&](const std::string& one_stmt)->bool {
+            bool handled = false;
+            bool ok = false;
+
+            if (exec) {
+                handled = true;
+                ok = exec->Execute(one_stmt);   // 手写执行器尝试
+                if (!ok) {
+                    // 手写没成功 -> 尝试走编译器
+                    handled = false;
+                }
             }
-            else {
-                // 计划
-                Planner pl;
-                Plan plan = pl.plan_from_stmt(stmt.get());
-                if (op_supported_by_plan(plan)) {
-                    // 我们支持的那些 op 走计划执行
-                    if (!exec || !exec->ExecutePlan(plan)) std::cerr << "Execution failed.\n";
-                    ran = true;
+
+            if (!handled) {
+                Status st = Status::OK();
+                Lexer lx(one_stmt);
+                Parser ps(lx);
+                auto stmt = ps.parse_statement(st);
+
+                if (!st.ok || !stmt) {
+                    std::cerr << "Syntax error: " << st.message << "\n";
+                    ok = false;
                 }
                 else {
-                    // 其它 op（如 SHOW/DESC/ALTER/USE）回退手写执行器
-                    if (exec && !exec->Execute(sql)) std::cerr << "Execution failed.\n";
-                    ran = true;
+                    CatalogEngineAdapter icat(cmgr, catalog);
+                    SemanticAnalyzer sem(icat);
+                    auto sres = sem.analyze(stmt.get());
+                    if (!sres.status.ok) {
+                        std::cerr << "Semantic error: " << sres.status.message << "\n";
+                        ok = false;
+                    }
+                    else {
+                        Planner pl;
+                        Plan plan = pl.plan_from_stmt(stmt.get());
+                        ok = (exec && exec->ExecutePlan(plan));
+                        if (!ok) std::cerr << "Execution failed.\n";
+                    }
                 }
             }
+
+            // 每条语句都持久化一次目录
+            cmgr.SaveCatalog(catalog);
+            return ok;
+            };
+
+        // 把缓冲区中的多条语句逐条切出来执行（按第一个 ';' 循环）
+        int inserted_in_batch = 0;
+        while (true) {
+            size_t pos = sql.find(';');
+            if (pos == std::string::npos) break;
+
+            std::string one_no_semi = trim_copy(sql.substr(0, pos));
+            // 删除已处理部分（包含 ';'）
+            sql.erase(0, pos + 1);
+            while (!sql.empty() && isspace((unsigned char)sql.front())) sql.erase(sql.begin());
+
+            if (one_no_semi.empty()) continue;
+
+            const std::string one_stmt = one_no_semi + ";";
+            const bool is_ins = is_insert_stmt(one_stmt);
+            bool ok = process_one_stmt(one_stmt);
+            if (ok && is_ins) ++inserted_in_batch;
         }
 
-        // 落盘当前库的目录（不管走哪条路径）
-        cmgr.SaveCatalog(catalog);
-        sql.clear();
+        // 若本批次有 INSERT，汇总输出
+        if (inserted_in_batch == 1) {
+            std::cout << "1 row inserted.\n";
+        }
+        else if (inserted_in_batch > 1) {
+            std::cout << inserted_in_batch << " rows inserted.\n";
+        }
+
+        // 如果还有半句（尾部没有 ';' 的残留），继续下一轮读取拼接
         continue;
     }
 

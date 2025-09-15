@@ -30,7 +30,6 @@ public:
     std::string current_db{ "default" }; // NEW: 当前库名
 
     // —— NEW: 数据库管理 —— 
-    bool ExecuteShowDatabases();
     bool ExecuteCreateDatabase(const std::string& db);
     bool ExecuteDropDatabase(const std::string& db);
     bool ExecuteUseDatabase(const std::string& db);
@@ -49,18 +48,18 @@ public:
         const std::string& whereVal);
     bool ExecuteDropTable(const std::string& tableName, bool if_exists = false);
     // DESC / DESCRIBE
+
     bool ExecuteDesc(const std::string& tableName);
     // SHOW CREATE TABLE
     bool ExecuteShowCreate(const std::string& tableName);
+    bool ExecuteShowDatabases();
 
     // ALTER TABLE 分支
     bool ExecuteAlterRename(const std::string& oldName, const std::string& newName);
-    bool ExecuteAlterAdd(const std::string& tableName, const Column& col, const std::string& after);
+    bool ExecuteAlterAdd(const std::string& tableName, const Column& col, const std::string& after = "");
     bool ExecuteAlterDrop(const std::string& tableName, const std::string& colName);
-    bool ExecuteAlterModify(const std::string& tableName, const std::string& colName,
-        ColumnType ty, int len);
-    bool ExecuteAlterChange(const std::string& tableName, const std::string& oldName,
-        const Column& newDef);
+    bool ExecuteAlterModify(const std::string& tableName, const std::string& colName, ColumnType ty, int len);
+    bool ExecuteAlterChange(const std::string& tableName, const std::string& oldName, const Column& newDef);
 
     // 同时新增一个切库后的重绑定：
     bool RebindToCurrentDatabase(); // 根据 current_db 重新绑定 Catalog/Storage

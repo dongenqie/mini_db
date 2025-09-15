@@ -11,6 +11,31 @@
 #include <fstream>
 #include <filesystem>
 
+// 统一使用“引擎”的列/类型，避免与 minidb::Column 冲突
+using EngColumn = ::Column;
+using EngColumnType = ::ColumnType;
+
+static inline std::string ltrim1(std::string s) { while (!s.empty() && std::isspace((unsigned char)s.front())) s.erase(s.begin()); return s; }
+static inline std::string rtrim1(std::string s) { while (!s.empty() && std::isspace((unsigned char)s.back()))  s.pop_back(); return s; }
+static inline std::string trim1(std::string s) { return rtrim1(ltrim1(std::move(s))); }
+static inline std::string upper1(std::string s) { for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; }
+
+// 按逗号切分 “( ... )” 的内容，忽略引号/括号内的逗号
+static std::vector<std::string> split_items_respecting_paren(const std::string& inside) {
+    std::vector<std::string> out; std::string cur; int par = 0; char q = 0;
+    for (char c : inside) {
+        if (q) { if (c == q) q = 0; cur.push_back(c); continue; }
+        if (c == '\'' || c == '"') { q = c; cur.push_back(c); continue; }
+        if (c == '(') { ++par; cur.push_back(c); continue; }
+        if (c == ')' && par > 0) { --par; cur.push_back(c); continue; }
+        if (c == ',' && par == 0) { out.push_back(trim1(cur)); cur.clear(); continue; }
+        cur.push_back(c);
+    }
+    if (!trim1(cur).empty()) out.push_back(trim1(cur));
+    return out;
+}
+
+
 static std::string data_path_for(const std::string& fileName) {
     std::filesystem::create_directories("data");
     return std::string("data/") + fileName;
@@ -34,6 +59,229 @@ static std::string trim_semicolon(std::string s) {
     return s;
 }
 
+static std::string up(std::string s) {
+    for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+    return s;
+}
+
+// 解析列类型与属性：INT(10) [UNSIGNED] / TINYINT[(M)] / CHAR(n) / VARCHAR(n) / DECIMAL(p,s) / TIMESTAMP / FLOAT
+// 支持 INT(10) / DECIMAL(10,2) 这种把括号与类型黏在同一 token 的写法
+static bool parse_type_and_attrs(std::istringstream& is, EngColumn& col) {
+    auto UP = [](std::string s) { for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; };
+
+    // 从 token 中直接解析 (...) 的两个整数
+    auto parse_from_token = [](const std::string& tok, int& a, int& b, bool two, bool& ok) {
+        ok = false;
+        auto lp = tok.find('(');
+        auto rp = tok.rfind(')');
+        if (lp == std::string::npos || rp == std::string::npos || rp <= lp) return;
+        std::string inside = tok.substr(lp + 1, rp - lp - 1);
+        if (!two) {
+            try { a = std::stoi(inside); ok = true; }
+            catch (...) { ok = false; }
+        }
+        else {
+            auto comma = inside.find(',');
+            if (comma == std::string::npos) return;
+            try {
+                a = std::stoi(inside.substr(0, comma));
+                // 跳过可选空格
+                size_t p = comma + 1;
+                while (p < inside.size() && isspace((unsigned char)inside[p])) ++p;
+                b = std::stoi(inside.substr(p));
+                ok = true;
+            }
+            catch (...) { ok = false; }
+        }
+        };
+
+    // 从流里读取 '(' 后的一或两个整数
+    auto parse_from_stream = [&](int& a, int& b, bool two)->bool {
+        if (is.peek() != '(') return false;
+        char ch; is >> ch;           // '('
+        is >> a;
+        if (two) {
+            char c; is >> c; if (c != ',') return false;
+            // 跳过可选空格
+            while (isspace(is.peek())) is.get();
+            is >> b;
+        }
+        is >> ch; // ')'
+        return true;
+        };
+
+    std::string t;
+    if (!(is >> t)) return false;
+    std::string T = UP(t);
+
+    // INT / INT(10)
+    if (T.rfind("INT", 0) == 0) {
+        col.type = EngColumnType::INT; col.length = 0;
+        int m = 0, dummy = 0; bool ok = false;
+        parse_from_token(T, m, dummy, /*two*/false, ok);
+        if (ok) col.length = m;
+        else {
+            std::streampos pos = is.tellg();
+            if (parse_from_stream(m, dummy, false)) col.length = m;
+            else { is.clear(); is.seekg(pos); }
+        }
+    }
+    // TINYINT / TINYINT(3)
+    else if (T.rfind("TINYINT", 0) == 0) {
+        col.type = EngColumnType::TINYINT; col.length = 0;
+        int m = 0, dummy = 0; bool ok = false;
+        parse_from_token(T, m, dummy, /*two*/false, ok);
+        if (ok) col.length = m;
+        else {
+            std::streampos pos = is.tellg();
+            if (parse_from_stream(m, dummy, false)) col.length = m;
+            else { is.clear(); is.seekg(pos); }
+        }
+    }
+    // CHAR(n)
+    else if (T.rfind("CHAR", 0) == 0) {
+        col.type = EngColumnType::CHAR;
+        int m = 0, dummy = 0; bool ok = false;
+        parse_from_token(T, m, dummy, false, ok);
+        if (!ok) { if (!parse_from_stream(m, dummy, false)) return false; }
+        col.length = m;
+    }
+    // VARCHAR(n)
+    else if (T.rfind("VARCHAR", 0) == 0) {
+        col.type = EngColumnType::VARCHAR;
+        int m = 0, dummy = 0; bool ok = false;
+        parse_from_token(T, m, dummy, false, ok);
+        if (!ok) {
+            // 先尝试 "(m)"
+            std::streampos pos = is.tellg();
+            if (parse_from_stream(m, dummy, false)) {
+                col.length = m;
+            }
+            else {
+                // 再尝试裸的数字：VARCHAR 20
+                is.clear(); is.seekg(pos);
+                if (!(is >> m)) { return false; }       // 既无括号也无数字，报错
+                col.length = m;
+            }
+        }
+        else {
+            col.length = m;
+        }
+    }
+    // DECIMAL(p,s)
+    else if (T.rfind("DECIMAL", 0) == 0) {
+        col.type = EngColumnType::DECIMAL;
+        int p = 0, s = 0; bool ok = false;
+        parse_from_token(T, p, s, /*two*/true, ok);
+        if (!ok) { if (!parse_from_stream(p, s, true)) return false; }
+        col.length = p; col.scale = s;
+    }
+    // TIMESTAMP
+    else if (T == "TIMESTAMP") {
+        col.type = EngColumnType::TIMESTAMP;
+    }
+    // FLOAT
+    else if (T == "FLOAT") {
+        col.type = EngColumnType::FLOAT;
+    }
+    else {
+        return false;
+    }
+
+    // 后续可选属性
+    while (true) {
+        std::streampos p = is.tellg();
+        std::string kw; if (!(is >> kw)) break;
+        std::string UKW = UP(kw);
+
+        if (UKW == "UNSIGNED") {
+            col.unsigned_flag = true;
+            continue;
+        }
+        if (UKW == "NOT") {
+            std::string n2;
+            if (!(is >> n2) || UP(n2) != "NULL") { is.clear(); is.seekg(p); break; }
+            col.not_null = true;
+            continue;
+        }
+        if (UKW == "NULL") {
+            col.not_null = false;
+            continue;
+        }
+        if (UKW == "DEFAULT") {
+            // 读取一个字面量（数字或带引号的字符串）
+            std::string v;
+            if (!(is >> v)) { is.clear(); is.seekg(p); break; }
+            if (!v.empty() && (v.front() == '\'' || v.front() == '\"')) {
+                char q = v.front();
+                if (v.back() != q || v.size() == 1) {
+                    std::string more, buf = v;
+                    while (is >> more) {
+                        buf += " " + more;
+                        if (!more.empty() && more.back() == q) break;
+                    }
+                    v = buf;
+                }
+                if (v.size() >= 2 && v.front() == q && v.back() == q)
+                    v = v.substr(1, v.size() - 2);
+            }
+            col.default_value = v;
+            continue;
+        }
+        if (UKW == "AUTO_INCREMENT") {
+            col.auto_increment = true;
+            continue;
+        }
+        if (UKW == "COMMENT") {
+            std::string v;
+            if (!(is >> v)) { is.clear(); is.seekg(p); break; }
+            if (!v.empty() && (v.front() == '\'' || v.front() == '"')) {
+                char q = v.front();
+                if (v.back() != q || v.size() == 1) {
+                    std::string more, buf = v;
+                    while (is >> more) {
+                        buf += " " + more;
+                        if (!more.empty() && more.back() == q) break;
+                    }
+                    v = buf;
+                }
+                if (v.size() >= 2 && v.front() == q && v.back() == q)
+                    v = v.substr(1, v.size() - 2);
+            }
+            while (!v.empty() && (v.back() == ';' || isspace((unsigned char)v.back()))) v.pop_back();
+
+            col.comment = v;
+            continue;
+        }
+
+        // 不认识的词，回退
+        is.clear();
+        is.seekg(p);
+        break;
+    }
+
+    return true;
+}
+
+// 把列类型转 MySQL 风格字符串（注意 UNSIGNED）
+static std::string col_type_to_mysql(const EngColumn& c) {
+    const std::string base = [&]() -> std::string {
+        switch (c.type) {
+        case EngColumnType::INT:       return c.length > 0 ? std::string("int(") + std::to_string(c.length) + ")" : std::string("int");
+        case EngColumnType::TINYINT:   return c.length > 0 ? std::string("tinyint(") + std::to_string(c.length) + ")" : std::string("tinyint");
+        case EngColumnType::CHAR:      return std::string("char(") + std::to_string(c.length) + ")";
+        case EngColumnType::VARCHAR:   return std::string("varchar(") + std::to_string(c.length) + ")";
+        case EngColumnType::DECIMAL:   return std::string("decimal(") + std::to_string(c.length) + "," + std::to_string(c.scale) + ")";
+        case EngColumnType::TIMESTAMP: return std::string("timestamp");
+        case EngColumnType::FLOAT:     return std::string("float");
+        }
+        return std::string("varchar(0)");
+        }();
+        if (c.unsigned_flag && (c.type == EngColumnType::INT || c.type == EngColumnType::TINYINT))
+            return base + " unsigned";
+        return base;
+}
+
 // ==========================
 // Parse & Dispatch SQL
 // ==========================
@@ -45,110 +293,94 @@ bool Executor::Execute(const std::string& sql) {
     std::transform(command.begin(), command.end(), command.begin(), ::toupper);
 
     if (command == "CREATE") {
-        std::string tmp, tableName;
-        iss >> tmp >> tableName; // TABLE tableName
-
-        // Parse 列定义: (colName type [len], ...)
-        char ch;
-        iss >> ch; // '('
-        std::vector<Column> columns;
-
-        auto to_upper = [](std::string s) {
-            for (auto& c : s) c = (char)std::toupper((unsigned char)c);
-            return s;
-            };
-
-        // 去掉 token 尾部常见的分隔符（, ) ;）
-        auto strip_trailing_punct = [](std::string& s) {
-            while (!s.empty()) {
-                char c = s.back();
-                if (c == ',' || c == ')' || c == ';') s.pop_back();
-                else break;
-            }
-            };
-
-        while (iss.good()) {
-            // 跳空白
-            while (iss.peek() == ' ' || iss.peek() == '\t' || iss.peek() == '\n' || iss.peek() == '\r') iss.get();
-            if (!iss.good()) break;
-            if (iss.peek() == ')') break;
-
-            std::string colName, typeTok;
-            if (!(iss >> colName >> typeTok)) break;
-
-            std::string typeTokRaw = typeTok;            // 保留原始
-            std::string typeTokUp = to_upper(typeTok);  // 可能包含 ",", ")"
-
-            ColumnType type = ColumnType::VARCHAR;
-            int len = 0;
-
-            // 优先识别 VARCHAR[ (len) ] 这三种写法：
-            //   VARCHAR(20) / VARCHAR (20) / VARCHAR 20
-            if (typeTokUp.rfind("VARCHAR", 0) == 0) {
-                type = ColumnType::VARCHAR;
-
-                // 1) 在同一个 token 里带括号：VARCHAR(20) 或 VARCHAR(20),
-                auto lp = typeTokRaw.find('(');
-                if (lp != std::string::npos) {
-                    auto rp = typeTokRaw.find(')', lp + 1);
-                    if (rp != std::string::npos) {
-                        std::string num = typeTokRaw.substr(lp + 1, rp - lp - 1);
-                        try { len = std::stoi(num); }
-                        catch (...) { len = 0; }
-                        // 括号后若跟着逗号，会留在本 token 内，这里已经被我们解析掉了
-                    }
-                    else {
-                        // 非法括号配对，忽略长度
-                        len = 0;
-                    }
-                }
-                else {
-                    // 2) 没有括号：尝试 "VARCHAR ( 20 )"
-                    //    或兼容旧风格 "VARCHAR 20"
-                    // 看看下一个非空白是不是 '('
-                    while (iss.peek() == ' ' || iss.peek() == '\t') iss.get();
-                    if (iss.peek() == '(') {
-                        char c1, c2; int L = 0;
-                        iss >> c1 >> L >> c2; // 读 '(' 数字 ')'
-                        len = L;
-                    }
-                    else {
-                        // 兼容：VARCHAR 20
-                        int L = 0;
-                        std::streampos pos = iss.tellg();
-                        if (iss >> L) len = L; else { len = 0; iss.clear(); iss.seekg(pos); }
-                    }
-                }
-            }
-            else {
-                // 非 VARCHAR：去掉尾随的 , ) ; 再判别
-                strip_trailing_punct(typeTokUp);
-
-                if (typeTokUp == "INT") {
-                    type = ColumnType::INT;
-                }
-                else if (typeTokUp == "FLOAT") {
-                    type = ColumnType::FLOAT;
-                }
-                else {
-                    // 未知类型：兜底为 VARCHAR(0)
-                    type = ColumnType::VARCHAR;
-                    len = 0;
-                }
-            }
-
-            columns.emplace_back(colName, type, len);
-
-            // 吞掉分隔逗号（若还留在流里）
-            while (iss.peek() == ' ' || iss.peek() == '\t' || iss.peek() == '\n' || iss.peek() == '\r') iss.get();
-            if (iss.peek() == ',') { iss.get(); }
-            while (iss.peek() == ' ' || iss.peek() == '\t' || iss.peek() == '\n' || iss.peek() == '\r') iss.get();
+        std::string kw;
+        if (!(iss >> kw) || upper1(kw) != "TABLE") {
+            std::cerr << "CREATE: expect TABLE\n";
+            return false;
         }
-        iss >> ch; // ')'
 
+        // 读取表名；兼容 "user(" 这种把 '(' 黏在表名上的写法
+        std::string tableName;
+        if (!(iss >> tableName)) {
+            std::cerr << "CREATE TABLE: expect name\n";
+            return false;
+        }
+
+        bool hasParen = false;
+        if (!tableName.empty() && tableName.back() == '(') {
+            tableName.pop_back();       // 去掉末尾的 '('
+            hasParen = true;
+        }
+
+        // 如果上一步没看到 '('，就再读一个 '('（跳过空白）
+        if (!hasParen) {
+            char ch = 0;
+            // operator>> 会跳过空白
+            if (!(iss >> ch) || ch != '(') {
+                std::cerr << "CREATE TABLE: expect '('\n";
+                return false;
+            }
+        }
+
+        // 把括号里的内容完整读出来（支持多行）
+        std::string inside;
+        {
+            int par = 1;
+            char c;
+            while (iss.get(c)) {
+                if (c == '(') ++par;
+                else if (c == ')') {
+                    if (--par == 0) break;
+                }
+                inside.push_back(c);
+            }
+            if (par != 0) {
+                std::cerr << "CREATE TABLE: unbalanced parentheses\n";
+                return false;
+            }
+        }
+
+        std::vector<EngColumn> columns;
+        bool pk_seen = false;
+        std::string pk_col;
+
+        for (auto item : split_items_respecting_paren(inside)) {
+            if (item.empty()) continue;
+            std::string upItem = upper1(item);
+            if (upItem.rfind("PRIMARY KEY", 0) == 0) {
+                auto lp = item.find('(');
+                auto rp = item.rfind(')');
+                if (lp == std::string::npos || rp == std::string::npos || rp <= lp) {
+                    std::cerr << "PRIMARY KEY syntax\n";
+                    return false;
+                }
+                pk_col = trim1(item.substr(lp + 1, rp - lp - 1));
+                pk_seen = true;
+                continue;
+            }
+            std::istringstream is(item);
+            std::string colName;
+            if (!(is >> colName)) {
+                std::cerr << "bad column def\n";
+                return false;
+            }
+            EngColumn col;
+            col.name = colName;
+            if (!parse_type_and_attrs(is, col)) {
+                std::cerr << "bad type for column " << colName << "\n";
+                return false;
+            }
+            columns.push_back(col);
+        }
+
+        if (pk_seen) {
+            for (auto& c : columns)
+                if (c.name == pk_col) { c.primary_key = true; c.not_null = true; break; }
+        }
 
         return ExecuteCreateTable(tableName, columns, tableName + ".tbl");
     }
+
     else if (command == "INSERT") {
         std::string tmp, tableName;
         iss >> tmp >> tableName; // INTO tableName
@@ -210,24 +442,52 @@ bool Executor::Execute(const std::string& sql) {
     else if (command == "SELECT") {
         std::vector<std::string> cols;
         std::string col;
-        while (iss >> col && col != "FROM") {
-            if (col.back() == ',') col.pop_back();
+        while (iss >> col && upper1(col) != "FROM") {
+            if (!col.empty() && col.back() == ',') col.pop_back();
             cols.push_back(col);
         }
-        std::string tableName;
-        iss >> tableName;
-        std::string whereCol, whereVal, tmp;
-        if (iss >> tmp && tmp == "WHERE") {
-            iss >> whereCol >> tmp >> whereVal; // col = value
+        std::string tableName; iss >> tableName;
+        tableName = trim_semicolon(tableName);   // 去掉表名末尾的 ';'
+
+        std::string whereCol, whereVal, tok;
+        if (iss >> tok && upper1(tok) == "WHERE") {
+            std::string cond; std::getline(iss, cond);
+            cond = trim1(cond);
+            cond = trim_semicolon(cond);
+            // 支持无空格：id=2 / name="A B"
+            auto eq = cond.find('=');
+            if (eq != std::string::npos) {
+                whereCol = trim1(cond.substr(0, eq));
+                whereVal = trim1(cond.substr(eq + 1));
+                if (whereVal.size() >= 2 &&
+                    ((whereVal.front() == '\'' && whereVal.back() == '\'') ||
+                        (whereVal.front() == '"' && whereVal.back() == '"'))) {
+                    whereVal = whereVal.substr(1, whereVal.size() - 2);
+                }
+            }
         }
         return ExecuteSelect(tableName, cols, whereCol, whereVal);
     }
     else if (command == "DELETE") {
         std::string tmp, tableName;
         iss >> tmp >> tableName; // FROM tableName
+        tableName = trim_semicolon(tableName);
+
         std::string whereCol, whereVal;
-        if (iss >> tmp && tmp == "WHERE") {
-            iss >> whereCol >> tmp >> whereVal; // col = value
+        if (iss >> tmp && upper1(tmp) == "WHERE") {
+            std::string cond; std::getline(iss, cond);
+            cond = trim1(cond);
+            cond = trim_semicolon(cond);
+            auto eq = cond.find('=');
+            if (eq != std::string::npos) {
+                whereCol = trim1(cond.substr(0, eq));
+                whereVal = trim1(cond.substr(eq + 1));
+                if (whereVal.size() >= 2 &&
+                    ((whereVal.front() == '\'' && whereVal.back() == '\'') ||
+                        (whereVal.front() == '"' && whereVal.back() == '"'))) {
+                    whereVal = whereVal.substr(1, whereVal.size() - 2);
+                }
+            }
         }
         return ExecuteDelete(tableName, whereCol, whereVal);
     }
@@ -276,11 +536,15 @@ bool Executor::Execute(const std::string& sql) {
         return ExecuteDropTable(tableName, if_exists);
     }
     else if (command == "DESC" || command == "DESCRIBE") {
-        std::string tableName;
-        if (!(iss >> tableName)) { std::cerr << "DESC: expect table name\n"; return false; }
-        tableName = trim_semicolon(tableName);
-        return ExecuteDesc(tableName);
-}
+        std::string t1;
+        if (!(iss >> t1)) { std::cerr << "DESC: expect table name\n"; return false; }
+        // 兼容可选的 TABLE 关键字
+        if (upper1(t1) == "TABLE") {
+            if (!(iss >> t1)) { std::cerr << "DESC: expect table name\n"; return false; }
+        }
+        t1 = trim_semicolon(t1);
+        return ExecuteDesc(t1);
+    }
     else if (command == "SHOW") {
         auto UP = [](std::string s) { for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; };
 
@@ -308,7 +572,6 @@ bool Executor::Execute(const std::string& sql) {
         std::cerr << "SHOW: unsupported form\n";
         return false;
         }
-
     else if (command == "ALTER") {
         auto up = [](std::string s) { for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; };
 
@@ -350,14 +613,12 @@ bool Executor::Execute(const std::string& sql) {
         }
         else if (action == "ADD") {
             std::string colName; if (!(iss >> colName)) { std::cerr << "ALTER TABLE ADD: expect column name\n"; return false; }
-            ColumnType ty; int L = 0; if (!parse_type(ty, L)) { std::cerr << "ALTER TABLE ADD: bad type\n"; return false; }
-            // AFTER ?
-            std::string maybeAfter, afterCol; std::streampos p2 = iss.tellg();
-            if (iss >> maybeAfter) {
-                if (up(maybeAfter) == "AFTER") iss >> afterCol;
-                else { iss.clear(); iss.seekg(p2); }
-            }
-            return ExecuteAlterAdd(tableName, Column{ colName, ty, L, false, false }, afterCol);
+            std::string rest, token; { std::ostringstream os; while (iss >> token) { if (upper1(token) == "AFTER") { break; } os << token << " "; } rest = os.str(); }
+            EngColumn col; col.name = colName;
+            { std::istringstream is(rest); if (!parse_type_and_attrs(is, col)) { std::cerr << "ALTER TABLE ADD: bad definition\n"; return false; } }
+            std::string afterCol;
+            if (upper1(token) == "AFTER") { iss >> afterCol; afterCol = trim_semicolon(afterCol); }
+            return ExecuteAlterAdd(tableName, col, afterCol);
         }
         else if (action == "DROP") {
             std::string colName; if (!(iss >> colName)) { std::cerr << "ALTER TABLE DROP: expect column name\n"; return false; }
@@ -366,23 +627,47 @@ bool Executor::Execute(const std::string& sql) {
         }
         else if (action == "MODIFY") {
             std::string colName; if (!(iss >> colName)) { std::cerr << "ALTER TABLE MODIFY: expect column name\n"; return false; }
-            ColumnType ty; int L = 0; if (!parse_type(ty, L)) { std::cerr << "ALTER TABLE MODIFY: bad type\n"; return false; }
-            return ExecuteAlterModify(tableName, colName, ty, L);
+            std::string rest; { std::string piece; std::ostringstream os; while (iss >> piece) os << piece << " "; rest = os.str(); }
+            EngColumn col; col.name = colName;
+            { std::istringstream is(rest); if (!parse_type_and_attrs(is, col)) { std::cerr << "ALTER TABLE MODIFY: bad definition\n"; return false; } }
+            // 你的 CatalogManager::AlterModifyColumn 目前签名是 (type,len)，这里保持不变
+            return ExecuteAlterModify(tableName, colName, col.type, col.length);
         }
         else if (action == "CHANGE") {
             std::string oldName, newName;
-            if (!(iss >> oldName >> newName)) { std::cerr << "ALTER TABLE CHANGE: expect oldName newName\n"; return false; }
-            ColumnType ty; int L = 0; if (!parse_type(ty, L)) { std::cerr << "ALTER TABLE CHANGE: bad type\n"; return false; }
-            return ExecuteAlterChange(tableName, oldName, Column{ newName, ty, L, false, false });
+            if (!(iss >> oldName >> newName)) {
+                std::cerr << "ALTER TABLE CHANGE: expect oldName newName\n";
+                return false;
+            }
+            std::string rest;
+            {
+                std::string piece;
+                std::ostringstream os;
+                while (iss >> piece) os << piece << " ";
+                rest = os.str();
+            }
+            EngColumn col;
+            col.name = newName;
+            {
+                std::istringstream is(rest);
+                if (!parse_type_and_attrs(is, col)) {
+                    std::cerr << "ALTER TABLE CHANGE: bad definition\n";
+                    return false;
+                }
+            }
+            return ExecuteAlterChange(tableName, oldName, col);
         }
+
+        // 走到这里说明 ALTER 的子命令不被支持
         std::cerr << "ALTER TABLE: unsupported action\n";
         return false;
-        }
+        }  // <== 结束 if (command == "ALTER")
+
     else {
-        std::cerr << "Unknown command: " << command << "\n";
-        return false;
-    }
-}
+            std::cerr << "Unknown command: " << command << "\n";
+            return false;
+            }
+}  // <== 结束 bool Executor::Execute(const std::string& sql)
 
 // ==========================
 // CREATE TABLE
@@ -413,7 +698,6 @@ bool Executor::ExecuteInsert(const std::string& tableName,
     if (!storage.Insert(tableName, values)) {
         std::cerr << "Insert failed.\n"; return false;
     }
-    std::cout << "1 row inserted.\n";   // 新增：插入成功提示
     return true;
 }
 
@@ -539,39 +823,83 @@ bool Executor::ExecuteDesc(const std::string& tableName) {
     TableInfo* t = catalog.GetTable(tableName);
     if (!t) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
 
-    std::cout << "+--------------+----------------+\n";
-    std::cout << "| Field        | Type           |\n";
-    std::cout << "+--------------+----------------+\n";
+    // 固定列宽
+    const int W_FIELD = 12;
+    const int W_TYPE = 21;
+    const int W_NULL = 4;
+    const int W_KEY = 10;
+    const int W_DEF = 17;
+    const int W_EXTRA = 25;
+
+    auto line = [&]() {
+        std::cout << '+'
+            << std::string(W_FIELD + 2, '-') << '+'
+            << std::string(W_TYPE + 2, '-') << '+'
+            << std::string(W_NULL + 2, '-') << '+'
+            << std::string(W_KEY + 2, '-') << '+'
+            << std::string(W_DEF + 2, '-') << '+'
+            << std::string(W_EXTRA + 2, '-') << "+\n";
+        };
+
+    auto cell = [](const std::string& s, int w) {
+        std::cout << " " << std::left << std::setw(w) << s << " ";
+        };
+
+    line();
+    std::cout << '|'; cell("Field", W_FIELD);
+    std::cout << '|'; cell("Type", W_TYPE);
+    std::cout << '|'; cell("Null", W_NULL);
+    std::cout << '|'; cell("Key", W_KEY);
+    std::cout << '|'; cell("Default", W_DEF);
+    std::cout << '|'; cell("Extra", W_EXTRA);
+    std::cout << "|\n";
+    line();
+
     for (const auto& c : t->getSchema().GetColumns()) {
-        std::string ty = (c.type == ColumnType::INT ? "INT" :
-            (c.type == ColumnType::FLOAT ? "FLOAT" :
-                ("VARCHAR(" + std::to_string(c.length) + ")")));
-        std::cout << "| " << std::left << std::setw(12) << c.name
-            << " | " << std::left << std::setw(14) << ty << "|\n";
+        std::string ty = upper1(col_type_to_mysql(c));
+        std::string Null = c.not_null ? "NO" : "YES";
+        std::string Key = c.primary_key ? "PRI" : "";
+        std::string Def = c.default_value.empty() ? "NULL" : c.default_value;
+        std::string Extra;
+        if (c.auto_increment) Extra = "auto_increment";
+
+        std::cout << '|'; cell(c.name, W_FIELD);
+        std::cout << '|'; cell(ty, W_TYPE);
+        std::cout << '|'; cell(Null, W_NULL);
+        std::cout << '|'; cell(Key, W_KEY);
+        std::cout << '|'; cell(Def, W_DEF);
+        std::cout << '|'; cell(Extra, W_EXTRA);
+        std::cout << "|\n";
     }
-    std::cout << "+--------------+----------------+\n";
+    line();
     return true;
 }
+
 
 bool Executor::ExecuteShowCreate(const std::string& tableName) {
     TableInfo* t = catalog.GetTable(tableName);
     if (!t) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
 
-    std::ostringstream ddl;
-    ddl << "CREATE TABLE " << t->name << " (";
     const auto& cols = t->getSchema().GetColumns();
-    for (size_t i = 0; i < cols.size(); ++i) {
-        const auto& c = cols[i];
-        ddl << c.name << " "
-            << (c.type == ColumnType::INT ? "INT" :
-                c.type == ColumnType::FLOAT ? "FLOAT" :
-                ("VARCHAR(" + std::to_string(c.length) + ")"));
-        if (i + 1 < cols.size()) ddl << ", ";
+    std::ostringstream ddl;
+    ddl << "CREATE TABLE " << t->name << " (\n";
+    bool first = true; std::string pk;
+    for (const auto& c : cols) {
+        if (!first) ddl << ",\n";
+        first = false;
+        ddl << "  " << c.name << " " << upper1(col_type_to_mysql(c));
+        if (c.not_null) ddl << " NOT NULL"; else ddl << " NULL";
+        if (!c.default_value.empty()) ddl << " DEFAULT " << c.default_value;
+        if (c.auto_increment) ddl << " AUTO_INCREMENT";
+        if (!c.comment.empty()) ddl << " COMMENT \"" << c.comment << "\"";
+        if (c.primary_key) pk = c.name;
     }
-    ddl << ");";
+    if (!pk.empty()) ddl << ",\n  PRIMARY KEY(" << pk << ")";
+    ddl << "\n);";
     std::cout << ddl.str() << "\n";
     return true;
 }
+
 
 bool Executor::ExecuteAlterRename(const std::string& oldName, const std::string& newName) {
     if (catalogManager.RenameTable(catalog, oldName, newName)) {

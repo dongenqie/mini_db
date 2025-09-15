@@ -1,0 +1,8 @@
+[2025-09-15 16:34:46] CacheManager initialized: capacity=64, policy=LRU
+[2025-09-15 16:34:46] Cache miss: page 1 read from disk
+[2025-09-15 16:34:46] Cache add: page 1 added to cache
+[2025-09-15 16:34:46] Flush page success: page 1 flushed to disk
+[2025-09-15 16:34:46] Cache hit: page 1
+[2025-09-15 16:34:46] Cache hit: page 1
+[2025-09-15 16:34:46] Flush page success: page 1 flushed to disk
+[2025-09-15 16:34:46] Flush page skipped: page 1 is not dirty
