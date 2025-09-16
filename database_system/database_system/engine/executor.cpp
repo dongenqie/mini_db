@@ -12,8 +12,10 @@
 #include <filesystem>
 #include <functional> 
 #include <unordered_set> 
+#include <unordered_map>
 #include <chrono>
 #include <ctime>
+#include <cctype>
 
 // 统一使用“引擎”的列/类型，避免与 minidb::Column 冲突
 using EngColumn = ::Column;
@@ -38,7 +40,6 @@ static std::vector<std::string> split_items_respecting_paren(const std::string& 
     if (!trim1(cur).empty()) out.push_back(trim1(cur));
     return out;
 }
-
 
 static std::string data_path_for(const std::string& fileName) {
     std::filesystem::create_directories("data");
@@ -331,6 +332,56 @@ static inline std::string trim_all(const std::string& s) {
     return s.substr(b, e - b);
 }
 
+// ========= DQL helpers (new) =========
+static std::string to_upper_copy(std::string s) {
+    for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+    return s;
+}
+
+// 替换原来的 “auto strip_quotes = [&](...) {...};”
+static inline std::string strip_quotes(std::string s) {
+    s = trim1(std::move(s));  // 统一用全局的 trim1
+    if (s.size() >= 2 &&
+        ((s.front() == '"' && s.back() == '"') ||
+            (s.front() == '\'' && s.back() == '\''))) {
+        s = s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+// 简单 LIKE 匹配：支持 % (任意长度) 和 _ (单字符)
+static bool like_match(const std::string& text, const std::string& pattern) {
+    // 动态规划/回溯皆可；这里给一个小型回溯
+    size_t ti = 0, pi = 0, star = std::string::npos, match = 0;
+    while (ti < text.size()) {
+        if (pi < pattern.size() && (pattern[pi] == '_' || pattern[pi] == text[ti])) {
+            ++ti; ++pi; continue;
+        }
+        if (pi < pattern.size() && pattern[pi] == '%') {
+            star = ++pi; match = ti; continue;
+        }
+        if (star != std::string::npos) {
+            pi = star;
+            ti = ++match;
+            continue;
+        }
+        return false;
+    }
+    while (pi < pattern.size() && pattern[pi] == '%') ++pi;
+    return pi == pattern.size();
+}
+
+struct SelectExpr {
+    enum Kind { COL, STAR, CONCAT, CONCAT_WS, COUNT, SUM, AVG, MAX, MIN, LITERAL } kind{ COL };
+    std::string name;                 // 列名或别名（最终展示名）
+    std::string raw;                  // 原始文本（用于缺省列头）
+    std::vector<std::string> args;    // 函数的参数（列名或字面量）
+    bool is_star_count{ false };        // COUNT(*)
+    bool is_aggregate() const {
+        return kind == COUNT || kind == SUM || kind == AVG || kind == MAX || kind == MIN;
+    }
+};
+
 
 // ==========================
 // Parse & Dispatch SQL
@@ -529,33 +580,585 @@ bool Executor::Execute(const std::string& sql) {
         return ExecuteInsert(tableName, finalRow);
     }
     else if (command == "SELECT") {
-        std::vector<std::string> cols;
-        std::string col;
-        while (iss >> col && upper1(col) != "FROM") {
-            if (!col.empty() && col.back() == ',') col.pop_back();
-            cols.push_back(col);
+        // =============== 新增：解析 SELECT 子句（DISTINCT/列清单） ===============
+        auto UP = [](std::string s) {
+            for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+            return s;
+        };
+        
+        // 读出 SELECT 后第一段直到 FROM
+        std::string selTok, token;
+        std::ostringstream seloss;
+        // 把 "SELECT" 后到 "FROM" 前的 token 拿齐
+        while (iss >> token) {
+            if (UP(token) == "FROM") break;
+            seloss << token << " ";
         }
-        std::string tableName; iss >> tableName;
-        tableName = trim_semicolon(tableName);   // 去掉表名末尾的 ';'
+        std::string beforeFrom = trim1(seloss.str());   // ← 用 trim1
+        if (beforeFrom.empty()) { std::cerr << "SELECT: expect projection list\n"; return false; }
 
-        std::string whereCol, whereVal, tok;
-        if (iss >> tok && upper1(tok) == "WHERE") {
-            std::string cond; std::getline(iss, cond);
-            cond = trim1(cond);
-            cond = trim_semicolon(cond);
-            // 支持无空格：id=2 / name="A B"
-            auto eq = cond.find('=');
-            if (eq != std::string::npos) {
-                whereCol = trim1(cond.substr(0, eq));
-                whereVal = trim1(cond.substr(eq + 1));
-                if (whereVal.size() >= 2 &&
-                    ((whereVal.front() == '\'' && whereVal.back() == '\'') ||
-                        (whereVal.front() == '"' && whereVal.back() == '"'))) {
-                    whereVal = whereVal.substr(1, whereVal.size() - 2);
+        // 读取表名
+        std::string tableName;
+        if (!(iss >> tableName)) { std::cerr << "SELECT: expect table name\n"; return false; }
+        tableName = trim_semicolon(tableName);
+
+        // ======= 解析可选 WHERE / ORDER BY / LIMIT 子句（读取余下整行再拆）=======
+        std::string tail;
+        {
+            std::string piece; std::ostringstream os;
+            while (std::getline(iss, piece)) os << " " << piece;
+            tail = trim1(os.str());                          // ← 用 trim1
+            if (!tail.empty() && tail.back() == ';') tail.pop_back();
+            tail = trim1(tail);                              // ← 用 trim1
+        }
+
+        // 语法状态
+        bool useDistinct = false;
+        std::vector<std::string> projItems;     // 原样保存（含函数/AS 已在你现有代码里支持，尽量不动）
+        // ===== 兼容 DISTINCT 的多种写法 =====
+        {
+            std::string U = UP(beforeFrom);
+            if (U.rfind("DISTINCT(", 0) == 0 && !beforeFrom.empty() && beforeFrom.back() == ')') {
+                useDistinct = true;
+                auto lp = beforeFrom.find('(');
+                auto rp = beforeFrom.rfind(')');
+                std::string inside = trim1(beforeFrom.substr(lp + 1, rp - lp - 1));
+                projItems = split_items_respecting_paren(inside);
+            }
+            else if (U.rfind("DISTINCT ", 0) == 0) {
+                // ★ 修复点：支持 "DISTINCT password" 这种空格写法
+                useDistinct = true;
+                std::string rest = trim1(beforeFrom.substr(8)); // 去掉 "DISTINCT"
+                projItems = split_items_respecting_paren(rest); // 再按逗号切分
+            }
+            else {
+                // 原有：仅按逗号切分
+                std::vector<std::string> tmp;
+                std::string cur; int par = 0; char q = 0;
+                for (char c : beforeFrom) {
+                    if (q) { if (c == q) q = 0; cur.push_back(c); continue; }
+                    if (c == '\'' || c == '"') { q = c; cur.push_back(c); continue; }
+                    if (c == '(') { ++par; cur.push_back(c); continue; }
+                    if (c == ')' && par > 0) { --par; cur.push_back(c); continue; }
+                    if (c == ',' && par == 0) { if (!trim1(cur).empty()) tmp.push_back(trim1(cur)); cur.clear(); continue; }
+                    cur.push_back(c);
+                }
+                if (!trim1(cur).empty()) tmp.push_back(trim1(cur));
+
+                // 兜底：如果首项形如 DISTINCT(col)
+                if (!tmp.empty()) {
+                    std::string t0 = tmp[0];
+                    std::string U0 = UP(t0);
+                    if (U0.rfind("DISTINCT(", 0) == 0 && !t0.empty() && t0.back() == ')') {
+                        useDistinct = true;
+                        auto lp = t0.find('(');
+                        auto rp = t0.rfind(')');
+                        tmp[0] = trim1(t0.substr(lp + 1, rp - lp - 1));
+                    }
+                }
+                projItems = std::move(tmp);
+            }
+            if (projItems.empty()) { std::cerr << "SELECT: empty projection\n"; return false; }
+        }
+        // =============== 解析 tail: WHERE / ORDER BY / LIMIT ===================
+        enum WhereMode { W_NONE = 0, W_EQ = 1, W_LIKE = 2 };
+        WhereMode whereMode = W_NONE;
+        std::string whereCol, whereValOrPat;
+
+        std::string orderByCol; bool orderDesc = false;
+        long long limitCount = -1, limitOffset = 0;
+
+        auto ci_find = [&](const std::string& hay, const std::string& needle)->size_t {
+            std::string H = UP(hay), N = UP(needle);
+            return H.find(N);
+            };
+
+        // 拆出 WHERE 子串（直到 ORDER BY/LIMIT 或字符串末尾）
+        std::string tail_work = tail;
+        auto cut_clause = [&](const std::string& key)->std::pair<std::string, std::string> {
+            size_t p = ci_find(tail_work, key);
+            if (p == std::string::npos) return { "", tail_work };
+            std::string before = trim1(tail_work.substr(0, p));
+            std::string after = trim1(tail_work.substr(p + key.size()));
+            return { before, after };
+            };
+
+        // 顺序：找 WHERE
+        {
+            size_t p = ci_find(tail_work, "WHERE");
+            if (p != std::string::npos) {
+                std::string after = trim1(tail_work.substr(p + 5));
+                // 把 WHERE 后面再切出 ORDER BY / LIMIT
+                size_t pOB = ci_find(after, "ORDER BY");
+                size_t pLI = ci_find(after, "LIMIT");
+                size_t cut = std::string::npos;
+                if (pOB != std::string::npos) cut = (cut == std::string::npos ? pOB : std::min(cut, pOB));
+                if (pLI != std::string::npos) cut = (cut == std::string::npos ? pLI : std::min(cut, pLI));
+                std::string wherePart, rest;
+                if (cut == std::string::npos) { wherePart = trim1(after); rest = ""; }
+                else { wherePart = trim1(after.substr(0, cut)); rest = trim1(after.substr(cut)); }
+                // 解析 wherePart：支持 col = value / col LIKE pattern
+                std::string U = UP(wherePart);
+                size_t pLike = U.find(" LIKE ");
+                if (pLike != std::string::npos) {
+                    whereMode = W_LIKE;
+                    whereCol = trim1(wherePart.substr(0, pLike));
+                    whereValOrPat = strip_quotes(wherePart.substr(pLike + 6));
+                }
+                else {
+                    size_t pEq = wherePart.find('=');
+                    if (pEq != std::string::npos) {
+                        whereMode = W_EQ;
+                        whereCol = trim1(wherePart.substr(0, pEq));
+                        whereValOrPat = strip_quotes(wherePart.substr(pEq + 1));
+                    }
+                }
+                tail_work = rest;
+            }
+        }
+        // ORDER BY
+        {
+            size_t p = ci_find(tail_work, "ORDER BY");
+            if (p != std::string::npos) {
+                std::string after = trim1(tail_work.substr(p + 8));
+                // 截到 LIMIT
+                size_t pLI = ci_find(after, "LIMIT");
+                std::string obPart, rest;
+                if (pLI == std::string::npos) { obPart = trim1(after); rest = ""; }
+                else { obPart = trim1(after.substr(0, pLI)); rest = trim1(after.substr(pLI)); }
+                // 解析 "col [ASC|DESC]"
+                std::istringstream ois(obPart);
+                ois >> orderByCol;
+                std::string dir;
+                if (ois >> dir) orderDesc = (UP(dir) == "DESC");
+                tail_work = rest;
+            }
+        }
+        // LIMIT
+        {
+            size_t p = ci_find(tail_work, "LIMIT");
+            if (p != std::string::npos) {
+                std::string after = trim1(tail_work.substr(p + 5));
+                // 兼容：LIMIT n;  LIMIT n OFFSET m;  LIMIT m, n
+                // 去掉多余逗号
+                for (auto& c : after) if (c == ';') c = ' ';
+                // 先尝试逗号写法
+                size_t cpos = after.find(',');
+                if (cpos != std::string::npos) {
+                    std::string a = trim1(after.substr(0, cpos));
+                    std::string b = trim1(after.substr(cpos + 1));
+                    try {
+                        limitOffset = std::stoll(a);
+                        limitCount = std::stoll(b);
+                    }
+                    catch (...) { /*忽略，走下一种*/ }
+                }
+                else {
+                    // 尝试 "LIMIT n OFFSET m" / "LIMIT n"
+                    std::istringstream lis(after);
+                    long long n = -1, m = 0;
+                    lis >> n;
+                    std::string offkw;
+                    if (lis >> offkw) {
+                        if (UP(offkw) == "OFFSET") lis >> m;
+                    }
+                    limitCount = (n >= 0 ? n : -1);
+                    limitOffset = (m >= 0 ? m : 0);
                 }
             }
         }
-        return ExecuteSelect(tableName, cols, whereCol, whereVal);
+
+        // =============== 调用存储层取全表，然后 where/排序/投影/去重/limit ===============
+        TableInfo* table = catalog.GetTable(tableName);
+        if (!table) { std::cerr << "Error: table " << tableName << " not found.\n"; return false; }
+        const auto& schemaCols = table->getSchema().GetColumns();
+
+        // 列名 -> 索引
+        auto col_index = [&](const std::string& name)->int {
+            for (int i = 0; i < (int)schemaCols.size(); ++i) if (schemaCols[i].name == name) return i;
+            return -1;
+            };
+
+        auto rows_raw = storage.SelectAll(tableName);
+
+        // 使用全局版本的 like_match（文件顶部已定义），避免重复与不安全写法
+        // 如果你更倾向保留一个局部实现，也请使用 npos/size_type：
+        auto like_match = [](const std::string& s, const std::string& pat)->bool {
+            std::string::size_type si = 0, pi = 0;
+            std::string::size_type star = std::string::npos, match = 0;
+            while (si < s.size()) {
+                if (pi < pat.size() && (pat[pi] == '_' || pat[pi] == s[si])) { ++si; ++pi; }
+                else if (pi < pat.size() && pat[pi] == '%') { star = ++pi; match = si; }
+                else if (star != std::string::npos) { pi = star; si = ++match; }
+                else return false;
+            }
+            while (pi < pat.size() && pat[pi] == '%') ++pi;
+            return pi == pat.size();
+            };
+
+
+        int whereIdx = -1;
+        bool whereNumeric = false;
+        if (whereMode != W_NONE) {
+            whereIdx = col_index(whereCol);
+            if (whereIdx < 0) { std::cerr << "Error: WHERE column not found.\n"; return false; }
+            auto t = schemaCols[whereIdx].type;
+            whereNumeric = (t == ColumnType::INT || t == ColumnType::TINYINT || t == ColumnType::FLOAT || t == ColumnType::DECIMAL);
+        }
+
+        std::vector<std::vector<std::string>> filtered;
+        filtered.reserve(rows_raw.size());
+        for (auto& r : rows_raw) {
+            bool ok = true;
+            if (whereMode == W_EQ) {
+                if (whereIdx >= 0 && whereIdx < (int)r.size()) {
+                    if (whereNumeric) {
+                        auto to_num = [&](const std::string& x, double& out)->bool { try { size_t pos = 0; out = std::stod(x, &pos); while (pos < x.size() && isspace((unsigned char)x[pos]))++pos; return pos == x.size(); } catch (...) { return false; } };
+                        double a = 0, b = 0; ok = (to_num(r[whereIdx], a) && to_num(whereValOrPat, b) && a == b);
+                    }
+                    else ok = (r[whereIdx] == whereValOrPat);
+                }
+                else ok = false;
+            }
+            else if (whereMode == W_LIKE) {
+                if (whereIdx >= 0 && whereIdx < (int)r.size())
+                    ok = like_match(r[whereIdx], whereValOrPat);
+                else ok = false;
+            }
+            if (ok) filtered.push_back(r);
+        }
+
+        // ORDER BY（对 filtered 原始行排序）
+        if (!orderByCol.empty()) {
+            int obIdx = col_index(orderByCol);
+            if (obIdx < 0) { std::cerr << "Error: ORDER BY column not found.\n"; return false; }
+            bool num = false;
+            auto t = schemaCols[obIdx].type;
+            num = (t == ColumnType::INT || t == ColumnType::TINYINT || t == ColumnType::FLOAT || t == ColumnType::DECIMAL);
+
+            auto cmp = [&](const std::vector<std::string>& a, const std::vector<std::string>& b)->bool {
+                const std::string& A = (obIdx < (int)a.size() ? a[obIdx] : std::string());
+                const std::string& B = (obIdx < (int)b.size() ? b[obIdx] : std::string());
+                if (num) {
+                    auto to_d = [&](const std::string& s)->double { try { return std::stod(s); } catch (...) { return 0.0; } };
+                    double da = to_d(A), db = to_d(B);
+                    return orderDesc ? (da > db) : (da < db);
+                }
+                else {
+                    return orderDesc ? (A > B) : (A < B);
+                }
+                };
+            std::stable_sort(filtered.begin(), filtered.end(), cmp);
+        }
+
+        // ======= 投影（尽量沿用你已有的列/函数逻辑：这里保持原接口不动） =======
+        // 你的旧实现：star => 全列；否则逐列名/表达式生成 headers+outRows
+        // 这里重用原有投影路径：
+        //   - 如果是 '*'：投影所有列
+        //   - 否则：按 projItems（原样）输出列头，值来自行（或你已有的 CONCAT/CONCAT_WS 逻辑）
+        // 为了不破坏你已实现的函数列，这里简单复制你之前的套路：
+
+        // headers
+        std::vector<int> projIdx;
+        std::vector<std::string> headers;
+        bool star = (projItems.size() == 1 && projItems[0] == "*");
+        if (star) {
+            for (int i = 0; i < (int)schemaCols.size(); ++i) {
+                projIdx.push_back(i);
+                headers.push_back(schemaCols[i].name);
+            }
+        }
+        else {
+            // 对于函数列（如 CONCAT(...) / CONCAT_WS(...)），我们把 headers 设置为：
+            //  - 若包含 AS 别名，取别名
+            //  - 否则显示原文本
+            auto parse_as_name = [&](const std::string& expr)->std::string {
+                auto U = UP(expr);
+                size_t p = U.rfind(" AS ");
+                if (p == std::string::npos) return expr;      // 没有 AS，直接用表达式文本（此时 expr 已是不带 DISTINCT 的 core）
+                std::string alias = trim1(expr.substr(p + 4));
+                alias = strip_quotes(alias);
+                return alias.empty() ? expr : alias;
+                };
+            for (auto& c : projItems) {
+                // 纯列名 -> 记索引；函数/表达式 -> 用 -1，值在后面动态计算（保留你已有逻辑）
+                // 这里只负责 header 名，不破坏你已有的函数求值路径
+                std::string nameForHead = parse_as_name(c);
+                headers.push_back(nameForHead);
+            }
+        }
+
+        // 构造输出行：如果是简单列，用索引；若是表达式/函数，沿用你原有逻辑（在这里按最简规则实现 CONCAT/CONCAT_WS，其他保持不变）
+        auto eval_expr = [&](const std::vector<std::string>& row, const std::string& expr)->std::string {
+            // 已有环境里 CONCAT/CONCAT_WS 正常，这里提供保底实现，防止改动破坏原行为
+            // 1) 解析 AS，取 AS 前面的表达式本体
+            auto U = UP(expr);
+            size_t pAS = U.rfind(" AS ");
+            std::string core = (pAS == std::string::npos ? expr : trim1(expr.substr(0, pAS)));
+
+            // 2) CONCAT(...) / CONCAT_WS(sep, ...)
+            auto eval_col = [&](const std::string& id)->std::string {
+                int idx = col_index(id);
+                return (idx >= 0 && idx < (int)row.size()) ? row[idx] : "";
+                };
+
+            auto starts = [&](const char* kw) { std::string Uc = UP(core); return Uc.rfind(kw, 0) == 0; };
+
+            if (starts("CONCAT(") && !core.empty() && core.back() == ')') {
+                std::string inside = trim1(core.substr(7, core.size() - 8));
+                // split by comma respecting quotes/parens
+                auto items = split_items_respecting_paren(inside);
+                std::ostringstream os;
+                for (size_t i = 0; i < items.size(); ++i) {
+                    std::string it = trim1(items[i]);
+                    // 是列还是字面量
+                    if ((it.size() >= 2 && ((it.front() == '\'' && it.back() == '\'') || (it.front() == '"' && it.back() == '"'))))
+                        os << strip_quotes(it);
+                    else
+                        os << eval_col(it);
+                }
+                return os.str();
+            }
+            if (starts("CONCAT_WS(") && !core.empty() && core.back() == ')') {
+                std::string inside = trim1(core.substr(10, core.size() - 11));
+                auto items = split_items_respecting_paren(inside);
+                if (items.empty()) return "";
+                std::string sep = strip_quotes(trim1(items[0]));
+                std::vector<std::string> parts;
+                for (size_t i = 1; i < items.size(); ++i) {
+                    std::string it = trim1(items[i]);
+                    if ((it.size() >= 2 && ((it.front() == '\'' && it.back() == '\'') || (it.front() == '"' && it.back() == '"'))))
+                        parts.push_back(strip_quotes(it));
+                    else
+                        parts.push_back(eval_col(it));
+                }
+                // MySQL 的 CONCAT_WS 会跳过 NULL；我们没有 NULL，空串按空
+                std::ostringstream os;
+                for (size_t i = 0; i < parts.size(); ++i) {
+                    if (i) os << sep;
+                    os << parts[i];
+                }
+                return os.str();
+            }
+
+            // 3) 纯列名
+            int idx = col_index(core);
+            if (idx >= 0 && idx < (int)row.size()) return row[idx];
+
+            // 4) 字面量
+            return strip_quotes(core);
+            };
+
+        // ======= 聚合识别与计算（COUNT/SUM/AVG/MAX/MIN）=======
+        struct AggInfo {
+            enum { NONE, COUNT, SUM, AVG, MAX, MIN } kind{ NONE };
+            std::string arg;   // 列名或 "*"（仅 COUNT 支持 "*"）
+            bool is_star{ false };
+        };
+
+        auto parse_alias = [&](const std::string& expr, std::string& core, std::string& alias) {
+            auto U = UP(expr);
+            size_t pAS = U.rfind(" AS ");
+            if (pAS == std::string::npos) { core = trim1(expr); alias.clear(); }
+            else {
+                core = trim1(expr.substr(0, pAS));
+                alias = strip_quotes(trim1(expr.substr(pAS + 4)));
+            }
+            };
+
+        auto parse_agg = [&](const std::string& expr)->AggInfo {
+            std::string core, alias; parse_alias(expr, core, alias);
+            std::string U = UP(core);
+            AggInfo ai;
+
+            auto is_func = [&](const char* name)->bool {
+                std::string N = name;
+                return (U.rfind(N + "(", 0) == 0) && (!core.empty() && core.back() == ')');
+                };
+            auto inside = [&](size_t name_len)->std::string {
+                return trim1(core.substr(name_len + 1, core.size() - (name_len + 2))); // 去掉 NAME( ... )
+                };
+
+            if (is_func("COUNT")) {
+                ai.kind = AggInfo::COUNT;
+                std::string in = inside(5);
+                if (UP(in) == "*") { ai.is_star = true; ai.arg = "*"; }
+                else { ai.arg = strip_quotes(in); }
+            }
+            else if (is_func("SUM")) { ai.kind = AggInfo::SUM;  ai.arg = strip_quotes(inside(3)); }
+            else if (is_func("AVG")) { ai.kind = AggInfo::AVG;  ai.arg = strip_quotes(inside(3)); }
+            else if (is_func("MAX")) { ai.kind = AggInfo::MAX;  ai.arg = strip_quotes(inside(3)); }
+            else if (is_func("MIN")) { ai.kind = AggInfo::MIN;  ai.arg = strip_quotes(inside(3)); }
+            return ai;
+            };
+
+        std::vector<AggInfo> aggs;
+        aggs.reserve(projItems.size());
+        bool hasAgg = false;
+        for (auto& e : projItems) {
+            AggInfo ai = parse_agg(e);
+            if (ai.kind != AggInfo::NONE) hasAgg = true;
+            aggs.push_back(ai);
+        }
+
+        auto is_numeric_col = [&](int idx)->bool {
+            if (idx < 0 || idx >= (int)schemaCols.size()) return false;
+            auto t = schemaCols[idx].type;
+            return (t == ColumnType::INT || t == ColumnType::TINYINT || t == ColumnType::FLOAT || t == ColumnType::DECIMAL);
+            };
+
+        if (hasAgg) {
+            // 只返回一行
+            std::vector<std::string> oneRow;
+            oneRow.reserve(projItems.size());
+
+            for (size_t i = 0; i < projItems.size(); ++i) {
+                const AggInfo& A = aggs[i];
+                if (A.kind == AggInfo::NONE) {
+                    // 非聚合表达式：沿用你已有的 eval_expr，对第一行计算（或空表返回空串）
+                    if (!filtered.empty()) oneRow.push_back(eval_expr(filtered[0], projItems[i]));
+                    else                   oneRow.push_back("");
+                    continue;
+                }
+
+                // 仅支持列参数或 COUNT(*)
+                int colIdx = -1;
+                if (!A.is_star) colIdx = col_index(A.arg);
+
+                switch (A.kind) {
+                case AggInfo::COUNT: {
+                    if (A.is_star) {
+                        oneRow.push_back(std::to_string(filtered.size()));
+                        break;
+                    }
+                    if (colIdx < 0) {
+                        std::cerr << "COUNT: column not found: " << A.arg << "\n";
+                        return false;
+                    }
+                    size_t cnt = 0;
+                    for (auto& r : filtered) {
+                        if (colIdx < (int)r.size()) {
+                            const std::string& cell = r[colIdx];
+                            // 视空串为“NULL”——不计数
+                            if (!trim1(cell).empty()) ++cnt;
+                        }
+                    }
+                    oneRow.push_back(std::to_string(cnt));
+                    break;
+                }
+                case AggInfo::SUM:
+                case AggInfo::AVG: {
+                    if (colIdx < 0) { std::cerr << "SUM/AVG: column not found: " << A.arg << "\n"; return false; }
+                    double s = 0.0; size_t n = 0;
+                    for (auto& r : filtered) {
+                        if (colIdx >= (int)r.size()) continue;
+                        try { s += std::stod(r[colIdx]); ++n; }
+                        catch (...) { /*跳过不可转数值*/ }
+                    }
+                    if (A.kind == AggInfo::SUM) {
+                        std::ostringstream os; os << std::fixed << std::setprecision(2) << s;
+                        oneRow.push_back(os.str());
+                    }
+                    else {
+                        double avg = (n ? (s / n) : 0.0);
+                        std::ostringstream os; os << std::fixed << std::setprecision(2) << avg;
+                        oneRow.push_back(os.str());
+                    }
+                    break;
+                }
+                case AggInfo::MAX:
+                case AggInfo::MIN: {
+                    if (colIdx < 0) { std::cerr << "MAX/MIN: column not found: " << A.arg << "\n"; return false; }
+                    bool numeric = is_numeric_col(colIdx);
+                    bool inited = false;
+                    std::string best;
+                    auto better = [&](const std::string& a, const std::string& b)->bool {
+                        if (A.kind == AggInfo::MAX) return a > b; else return a < b;
+                        };
+                    for (auto& r : filtered) {
+                        if (colIdx >= (int)r.size()) continue;
+                        const std::string& val = r[colIdx];
+                        if (!inited) { best = val; inited = true; continue; }
+                        if (numeric) {
+                            double da = 0, db = 0;
+                            try { da = std::stod(val); }
+                            catch (...) { continue; }
+                            try { db = std::stod(best); }
+                            catch (...) { /*best 不可转数，换成数值*/ best = val; continue; }
+                            if ((A.kind == AggInfo::MAX && da > db) || (A.kind == AggInfo::MIN && da < db)) best = val;
+                        }
+                        else {
+                            if (better(val, best)) best = val;
+                        }
+                    }
+                    oneRow.push_back(inited ? best : "");
+                    break;
+                }
+                default: oneRow.push_back("");
+                }
+            }
+
+            // DISTINCT 对聚合无意义，这里直接忽略 useDistinct
+            std::vector<std::vector<std::string>> onlyOne{ std::move(oneRow) };
+            print_boxed_table(headers, onlyOne);
+            return true;
+        }
+
+        std::vector<std::vector<std::string>> outRows;
+        outRows.reserve(filtered.size());
+
+        if (star) {
+            // 直接（*）全列
+            for (auto& r : filtered) {
+                std::vector<std::string> out;
+                for (int i = 0; i < (int)schemaCols.size(); ++i)
+                    out.push_back(i < (int)r.size() ? r[i] : "");
+                outRows.push_back(std::move(out));
+            }
+        }
+        else {
+            for (auto& r : filtered) {
+                std::vector<std::string> out;
+                out.reserve(projItems.size());
+                for (auto& e : projItems) out.push_back(eval_expr(r, e));
+                outRows.push_back(std::move(out));
+            }
+        }
+
+        // DISTINCT：对整行去重（文本完全一致即去重）；支持 DISTINCT(...) 已在投影时归一化
+        if (useDistinct) {
+            std::vector<std::vector<std::string>> uniq;
+            std::unordered_set<std::string> seen;
+            auto key_of = [](const std::vector<std::string>& r)->std::string {
+                std::ostringstream os;
+                for (size_t i = 0; i < r.size(); ++i) { if (i) os << '\x1f'; os << r[i]; }
+                return os.str();
+                };
+            for (auto& r : outRows) {
+                std::string k = key_of(r);
+                if (seen.insert(k).second) uniq.push_back(std::move(r));
+            }
+            outRows.swap(uniq);
+        }
+
+        // LIMIT/OFFSET
+        if (limitCount >= 0) {
+            size_t off = (size_t)std::max(0LL, limitOffset);
+            size_t cnt = (size_t)limitCount;
+            if (off < outRows.size()) {
+                size_t end = std::min(outRows.size(), off + cnt);
+                std::vector<std::vector<std::string>> sliced(outRows.begin() + off, outRows.begin() + end);
+                outRows.swap(sliced);
+            }
+            else {
+                outRows.clear();
+            }
+        }
+
+        // 打印
+        if (headers.empty()) { std::cout << "(empty)\n"; }
+        else { print_boxed_table(headers, outRows); }
+        return true;
     }
     else if (command == "DELETE") {
         std::string tmp, tableName;
